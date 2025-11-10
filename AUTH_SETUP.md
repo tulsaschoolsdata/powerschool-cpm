@@ -13,6 +13,8 @@ This approach works because CPM endpoints appear to be "internal-only" APIs that
 
 ## 🔧 **Setup Steps**
 
+ - **Suggestion**: Set up a service account specifically for this plugin.
+
 ### **Step 1: Configure Authentication Method**
 1. **Open VS Code Settings**: `Cmd+,` (Mac) or `Ctrl+,` (Windows/Linux)
 2. **Search**: "PowerSchool CPM"
@@ -42,22 +44,13 @@ You need **both** OAuth and session credentials:
 
 ---
 
-## ⚙️ **Authentication Methods Available**
+## ⚙️ **Authenticatione**
 
-### **1. Hybrid (Recommended)**
+### **1. Hybrid**
+- **Access Plugin**: Requires plugin with oauth to provide client id and secret + Access Level for v1 APIs set to full.
 - **Standard APIs**: Uses OAuth (secure, token-based)
 - **CPM APIs**: Uses session authentication (username/password)
 - **Best of both worlds**: Secure where possible, functional for CPM
-
-### **2. OAuth Only**
-- Uses OAuth for all APIs
-- **Pros**: Most secure
-- **Cons**: CPM endpoints will fail (as you experienced)
-
-### **3. Session Only**
-- Uses username/password for all APIs  
-- **Pros**: Works with all PowerSchool endpoints
-- **Cons**: Less secure, stores passwords
 
 ---
 
@@ -75,12 +68,6 @@ The extension automatically chooses the right authentication:
 /ws/v1/time
 /ws/v1/student
 ```
-
-### **Seamless Integration**
-- **No manual switching needed**
-- **Automatic fallback** to appropriate auth method
-- **Single configuration** handles both types
-
 ---
 
 ## 📋 **Complete Configuration Example**
@@ -89,22 +76,16 @@ The extension automatically chooses the right authentication:
 PowerSchool CPM Settings:
 ├── Server URL: "https://pstest.yourschool.org"
 ├── Auth Method: "hybrid"
-├── Client ID: "66fc77ee-359b-4f15-971e-8bd5d3e83fd7"  
-├── Client Secret: "3260cf45-41c3-4f16-b8e3-8b120a4afc54"
-├── Username: "admin"
-└── Password: "your-admin-password"
+├── Client ID: "Your client ID"  
+├── Client Secret: "Your Client Secret"
+├── Username: "Your PowerSchool admin account username"
+└── Password: "Your PowerSchool admin account password"
 ```
 
 ---
 
 ## 🚀 **Expected Results After Setup**
 
-### **Before (OAuth Only):**
-```
-❌ API Error 401: CPM API authentication failed
-```
-
-### **After (Hybrid Authentication):**
 ```
 ✅ PowerSchool file tree loaded  
 ✅ CPM API endpoints accessible
@@ -125,22 +106,3 @@ PowerSchool CPM Settings:
 1. **Check Plugin Installation**: Ensure PowerSchool plugin is installed/enabled
 2. **Verify Credentials**: Check Client ID and Secret are correct
 3. **Test Standard APIs**: Run connection test to diagnose OAuth issues
-
----
-
-## 💡 **Why This Works**
-
-PowerSchool has different API tiers:
-- **Public APIs**: Support OAuth authentication
-- **Internal APIs**: Require session-based authentication
-- **CPM APIs**: Fall into the "internal" category
-
-The hybrid approach respects these architectural decisions while providing the best user experience.
-
----
-
-## 🎉 **Ready to Test!**
-
-**Current Status**: Extension v1.1.0 installed with hybrid authentication support
-
-**Next Step**: Configure your settings with both OAuth and session credentials, then test the connection!
