@@ -1,9 +1,8 @@
 # PowerSchool CPM Extension
 
-A VS Code extension that provides seamless integration with PowerSchool's Custom Page Management system. This extension syncs your current workspace directory with PowerSchool's file structure, making development and management of custom pages easier.
+A VS Code extension that provides seamless integration with PowerSchool's Custom Page Management system. This extension syncs your current workspace directory with PowerSchool's file structure, making plugin development and management of custom pages easier.
 
 ## Features
-- **Plugin Development**
 - **PowerSchool API Integration**: Uses PowerSchool's CPM API to fetch folder structures
 - **File System Management**: Saves files to local file structure and publishes them to PowerSchool to see real time changes
 - **Configuration Options**: Customizable server URL, sync depth
