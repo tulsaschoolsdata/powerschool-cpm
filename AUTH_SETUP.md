@@ -1,24 +1,22 @@
 # 🎯 PowerSchool CPM Hybrid Authentication Setup
 
-## The Solution: Hybrid Authentication
-
-Based on your error, I've created a **hybrid authentication system** that solves the CPM API access issue:
-
 - **OAuth for standard APIs** (like `/ws/v1/*`)
 - **Session authentication for CPM APIs** (like `/ws/cpm/*`)
 
-This approach works because CPM endpoints appear to be "internal-only" APIs that don't support OAuth.
+CPM endpoints appear to be "internal-only" APIs that don't support OAuth.
 
 ---
 
 ## 🔧 **Setup Steps**
 
- - **Suggestion**: Set up a service account specifically for this plugin.
-
 ### **Step 1: Configure Authentication Method**
-1. **Open VS Code Settings**: `Cmd+,` (Mac) or `Ctrl+,` (Windows/Linux)
-2. **Search**: "PowerSchool CPM"
-3. **Set Authentication Method**: Choose **"hybrid"**
+1. **Access Plugin**: The ps-vscode-cpm extension requires a basic PowerSchool plugin with oauth to provide client id and secret + Access Level for v1 APIs set to full.
+2. **Access Account**; The ps-vscode-cpm extension requires an active admin account.
+  - **Suggestion**: Set up a service account specifically for this plugin.
+4. Install the plugin.
+5. **Open VS Code Settings**: `Cmd+,` (Mac) or `Ctrl+,` (Windows/Linux)
+6. **Search**: "PowerSchool CPM"
+8. **Set Authentication Method**: Choose **"hybrid"**
 
 ### **Step 2: Configure Credentials**
 You need **both** OAuth and session credentials:
@@ -47,7 +45,6 @@ You need **both** OAuth and session credentials:
 ## ⚙️ **Authenticatione**
 
 ### **1. Hybrid**
-- **Access Plugin**: Requires plugin with oauth to provide client id and secret + Access Level for v1 APIs set to full.
 - **Standard APIs**: Uses OAuth (secure, token-based)
 - **CPM APIs**: Uses session authentication (username/password)
 - **Best of both worlds**: Secure where possible, functional for CPM
@@ -89,20 +86,20 @@ PowerSchool CPM Settings:
 ```
 ✅ PowerSchool file tree loaded  
 ✅ CPM API endpoints accessible
-✅ File download/upload working
-✅ Template creation working
+✅ File download/upload
+✅ Template creation
 ```
 
 ---
 
 ## 🔧 **Troubleshooting**
 
-### **If CPM APIs Still Fail:**
+### **If CPM APIs Fail:**
 1. **Check Username/Password**: Ensure admin credentials are correct
 2. **Verify Admin Access**: User must have access to customization pages
 3. **Test Manual Login**: Try logging into PowerSchool web interface
 
-### **If OAuth APIs Fail:**
+### **If OAuth APIs Fails:**
 1. **Check Plugin Installation**: Ensure PowerSchool plugin is installed/enabled
 2. **Verify Credentials**: Check Client ID and Secret are correct
 3. **Test Standard APIs**: Run connection test to diagnose OAuth issues
