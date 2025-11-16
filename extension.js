@@ -31,13 +31,22 @@ function generateMultipartData(fields, boundary) {
 
 
 class PowerSchoolTreeItem extends vscode.TreeItem {
-    constructor(label, collapsibleState, resourceUri, contextValue, remotePath, psApi, localRootPath) {
+    constructor(label, collapsibleState, resourceUri, contextValue, remotePath, psApi, localRootPath, isCustom = false, pluginInfo = null) {
         super(label, collapsibleState);
         this.resourceUri = resourceUri;
         this.contextValue = contextValue;
         this.remotePath = remotePath;
         this.psApi = psApi;
         this.localRootPath = localRootPath;
+        this.isCustom = isCustom;
+        this.pluginInfo = pluginInfo;  // { pluginId, pluginName, enabled }
+        
+        // Update contextValue to include custom and plugin status
+        if (isCustom && pluginInfo) {
+            this.contextValue = contextValue === 'file' ? 'file-custom-plugin' : 'folder-custom-plugin';
+        } else if (isCustom) {
+            this.contextValue = contextValue === 'file' ? 'file-custom' : 'folder-custom';
+        }
         
         if (contextValue === 'file') {
             this.command = {
@@ -47,22 +56,78 @@ class PowerSchoolTreeItem extends vscode.TreeItem {
             };
             this.iconPath = this.getFileIcon();
         } else {
-            this.iconPath = new vscode.ThemeIcon('folder');
+            this.iconPath = this.getFolderIcon();
+        }
+        
+        // Add color to custom file/folder labels via resourceUri scheme
+        if (isCustom && pluginInfo) {
+            // Plugin files/folders get purple text
+            this.resourceUri = vscode.Uri.parse(`plugin:${label}`);
+        } else if (isCustom) {
+            // Custom non-plugin files/folders get blue text
+            this.resourceUri = vscode.Uri.parse(`custom:${label}`);
+        }
+        
+        // Enhanced tooltip with custom status and plugin info
+        let customStatus = '';
+        if (isCustom && pluginInfo) {
+            const enabledStatus = pluginInfo.enabled ? '' : ' (Disabled)';
+            customStatus = ` (Plugin: ${pluginInfo.pluginName}${enabledStatus})`;
+        } else if (isCustom) {
+            customStatus = ' (Custom - No Plugin)';
+        } else {
+            customStatus = ' (Original PowerSchool)';
         }
         
         this.tooltip = contextValue === 'file' ? 
-            `${label}\nClick to download from PowerSchool` :
-            `${label} folder`;
+            `${label}${customStatus}\nClick to download from PowerSchool` :
+            `${label}${customStatus}`;
     }
     
     getFileIcon() {
         const localPath = path.join(this.localRootPath, this.remotePath.replace(/^\/+/g, ''));
         const exists = fs.existsSync(localPath);
         
-        if (exists) {
-            return new vscode.ThemeIcon('file', new vscode.ThemeColor('charts.green'));
+        // Plugin-controlled custom files get purple/magenta color
+        if (this.isCustom && this.pluginInfo) {
+            if (exists) {
+                // Plugin file, downloaded locally - purple
+                return new vscode.ThemeIcon('file', new vscode.ThemeColor('symbolIcon.interfaceForeground'));
+            } else {
+                // Plugin file, not downloaded - magenta
+                return new vscode.ThemeIcon('file', new vscode.ThemeColor('editorInfo.foreground'));
+            }
+        }
+        // Non-plugin custom files get blue/orange color
+        else if (this.isCustom) {
+            if (exists) {
+                // Custom file (no plugin), downloaded locally - blue
+                return new vscode.ThemeIcon('file', new vscode.ThemeColor('symbolIcon.classForeground'));
+            } else {
+                // Custom file (no plugin), not downloaded - orange
+                return new vscode.ThemeIcon('file', new vscode.ThemeColor('editorWarning.foreground'));
+            }
         } else {
-            return new vscode.ThemeIcon('cloud-download', new vscode.ThemeColor('charts.blue'));
+            // Original PowerSchool files - gray color
+            if (exists) {
+                return new vscode.ThemeIcon('file', new vscode.ThemeColor('disabledForeground'));
+            } else {
+                return new vscode.ThemeIcon('cloud-download', new vscode.ThemeColor('disabledForeground'));
+            }
+        }
+    }
+    
+    getFolderIcon() {
+        // Plugin folders get purple color
+        if (this.isCustom && this.pluginInfo) {
+            return new vscode.ThemeIcon('folder', new vscode.ThemeColor('symbolIcon.interfaceForeground'));
+        }
+        // Custom folders get blue color  
+        else if (this.isCustom) {
+            return new vscode.ThemeIcon('folder', new vscode.ThemeColor('symbolIcon.classForeground'));
+        } else {
+            // Original folders - default (gray)
+            return new vscode.ThemeIcon('folder');
         }
     }
 }
@@ -74,11 +139,56 @@ class PowerSchoolTreeProvider {
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
         this.treeCache = new Map();
+        this.pluginMappings = null;  // Cache for plugin file mappings
+        this.pluginMappingsLoaded = false;
     }
     
     refresh() {
         this.treeCache.clear();
+        this.pluginMappings = null;  // Clear plugin mappings cache
+        this.pluginMappingsLoaded = false;
         this._onDidChangeTreeData.fire();
+    }
+    
+    async loadPluginMappings() {
+        if (this.pluginMappingsLoaded) {
+            return this.pluginMappings;
+        }
+        
+        try {
+            const mappings = await this.psApi.getPluginFileMappings();
+            this.pluginMappings = new Map();
+            
+            // Build a map of file path to plugin info
+            for (const mapping of mappings) {
+                if (mapping.cpmpath && mapping.filename && mapping.pluginname) {
+                    const fullPath = `${mapping.cpmpath}/${mapping.filename}`.toLowerCase();
+                    const folderPath = mapping.cpmpath.toLowerCase();
+                    
+                    const pluginData = {
+                        pluginId: mapping.pluginid,
+                        pluginName: mapping.pluginname,
+                        enabled: mapping.enabled === '1' || mapping.enabled === 1 || mapping.enabled === true
+                    };
+                    
+                    // Map the full file path
+                    this.pluginMappings.set(fullPath, pluginData);
+                    
+                    // Also map the folder path to indicate it contains plugin files
+                    if (!this.pluginMappings.has(folderPath)) {
+                        this.pluginMappings.set(folderPath, pluginData);
+                    }
+                }
+            }
+            
+            this.pluginMappingsLoaded = true;
+            return this.pluginMappings;
+        } catch (error) {
+            console.warn(`⚠️  Failed to load plugin mappings: ${error.message}`);
+            this.pluginMappings = new Map();
+            this.pluginMappingsLoaded = true;
+            return this.pluginMappings;
+        }
     }
     
     getTreeItem(element) {
@@ -89,6 +199,7 @@ class PowerSchoolTreeProvider {
         try {
             // Check if workspace is available
             if (!this.localRootPath) {
+                console.log('⚠️ No workspace root path');
                 return [{
                     label: 'No workspace open',
                     description: 'Please open a folder to browse PowerSchool files',
@@ -145,21 +256,20 @@ class PowerSchoolTreeProvider {
                 const rootTree = await this.psApi.getFolderTree('/', 1);
                 
                 if (rootTree.folder) {
-                    return this.createTreeItems(rootTree.folder, '/');
+                    return await this.createTreeItems(rootTree.folder, '/');
                 }
                 return [];
-            } else if (element.contextValue === 'folder') {
+            } else if (element.contextValue === 'folder' || element.contextValue === 'folder-custom' || element.contextValue === 'folder-custom-plugin') {
                 const cacheKey = element.remotePath;
                 
                 if (this.treeCache.has(cacheKey)) {
                     return this.treeCache.get(cacheKey);
                 }
                 
-                console.log(`📂 Loading folder: ${element.remotePath}`);
                 const folderTree = await this.psApi.getFolderTree(element.remotePath, 1);
                 
                 if (folderTree.folder) {
-                    const items = this.createTreeItems(folderTree.folder, element.remotePath);
+                    const items = await this.createTreeItems(folderTree.folder, element.remotePath);
                     this.treeCache.set(cacheKey, items);
                     return items;
                 }
@@ -173,8 +283,13 @@ class PowerSchoolTreeProvider {
         }
     }
     
-    createTreeItems(folderData, currentPath) {
+    async createTreeItems(folderData, currentPath) {
         const items = [];
+        
+        // Load plugin mappings if not already loaded
+        console.log(`🔄 About to load plugin mappings...`);
+        const pluginMappings = await this.loadPluginMappings();
+        console.log(`✅ Plugin mappings loaded, size: ${pluginMappings.size}`);
         
         // Sort subfolders alphabetically and add to items
         if (folderData.subFolders) {
@@ -184,6 +299,14 @@ class PowerSchoolTreeProvider {
             
             for (const subfolder of sortedSubfolders) {
                 const folderPath = currentPath === '/' ? `/${subfolder.text}` : `${currentPath}/${subfolder.text}`;
+                const normalizedPath = folderPath.toLowerCase();
+                const pluginInfo = pluginMappings.get(normalizedPath) || null;
+                
+                // Debug logging for folders
+                if (subfolder.custom) {
+                    console.log(`📂 Folder: ${folderPath}, Custom: ${subfolder.custom}, Plugin: ${pluginInfo ? pluginInfo.pluginName : 'none'}`);
+                }
+                
                 const item = new PowerSchoolTreeItem(
                     subfolder.text,
                     vscode.TreeItemCollapsibleState.Collapsed,
@@ -191,7 +314,9 @@ class PowerSchoolTreeProvider {
                     'folder',
                     folderPath,
                     this.psApi,
-                    this.localRootPath
+                    this.localRootPath,
+                    subfolder.custom || false,  // Pass custom property from API
+                    pluginInfo  // Pass plugin info if available
                 );
                 items.push(item);
             }
@@ -205,6 +330,9 @@ class PowerSchoolTreeProvider {
             
             for (const page of sortedPages) {
                 const filePath = currentPath === '/' ? `/${page.text}` : `${currentPath}/${page.text}`;
+                const normalizedPath = filePath.toLowerCase();
+                const pluginInfo = pluginMappings.get(normalizedPath) || null;
+                
                 const item = new PowerSchoolTreeItem(
                     page.text,
                     vscode.TreeItemCollapsibleState.None,
@@ -212,7 +340,9 @@ class PowerSchoolTreeProvider {
                     'file',
                     filePath,
                     this.psApi,
-                    this.localRootPath
+                    this.localRootPath,
+                    page.custom || false,  // Pass custom property from API
+                    pluginInfo  // Pass plugin info if available
                 );
                 items.push(item);
             }
@@ -707,9 +837,13 @@ class PowerSchoolAPI {
         if (this.authMethod === 'session') return 'session';
         if (this.authMethod === 'oauth') return 'oauth';
         
-        // Hybrid mode - use session for CPM endpoints, OAuth for others
+        // Hybrid mode - use session for CPM endpoints and PowerQuery, OAuth for others
         if (this.authMethod === 'hybrid') {
-            return endpoint.includes('/ws/cpm/') ? 'session' : 'oauth';
+            // Use session auth for CPM endpoints and PowerQuery named queries
+            if (endpoint.includes('/ws/cpm/') || endpoint.includes('/ws/schema/query/')) {
+                return 'session';
+            }
+            return 'oauth';
         }
         
         return 'oauth'; // default
@@ -935,6 +1069,67 @@ class PowerSchoolAPI {
                 });
             });
             req.on('error', reject);
+            req.end();
+        });
+    }
+
+    async getPluginFileMappings() {
+        const endpoint = '/ws/schema/query/org.tulsaschools.plugin.file.mappings';
+        await this.ensureAuthenticated(endpoint);
+        
+        console.log('🔌 Fetching plugin file mappings from PowerSchool...');
+        
+        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        
+        // PowerQuery requires a POST body, even if empty
+        // Use pagesize=0 to get all results without pagination
+        const requestBody = JSON.stringify({});
+        
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: endpoint + '?pagesize=0',  // Add pagesize=0 to get all results
+            method: 'POST',
+            rejectUnauthorized: false,
+            headers: {
+                'Referer': `${this.baseUrl}/admin/customization/home.html`,
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(requestBody),
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                ...authHeaders
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let data = '';
+                
+                res.on('data', (chunk) => {
+                    data += chunk;
+                });
+                res.on('end', () => {
+                    try {
+                        if (res.statusCode === 200) {
+                            const response = JSON.parse(data);
+                            resolve(response.record || []);
+                        } else {
+                            console.warn(`⚠️  Plugin file mappings not available: ${res.statusCode}`);
+                            resolve([]); // Return empty array if not available
+                        }
+                    } catch (parseError) {
+                        console.warn(`⚠️  Failed to parse plugin mappings: ${parseError.message}`);
+                        resolve([]); // Return empty array on error
+                    }
+                });
+            });
+            req.on('error', (error) => {
+                console.warn(`⚠️  Plugin file mappings request failed: ${error.message}`);
+                resolve([]); // Return empty array on error
+            });
+            
+            // Send the request body
+            req.write(requestBody);
             req.end();
         });
     }
@@ -1596,15 +1791,6 @@ async function createPluginZip(workspaceRoot, pluginName, version, dirsToInclude
 function activate(context) {
     console.log('🚀 PowerSchool CPM extension activation started!');
 
-    // Prevent double activation
-    if (global.powerschoolCpmActivated) {
-        console.warn('PowerSchool CPM already activated, skipping...');
-        return;
-    }
-    global.powerschoolCpmActivated = true;
-    
-    console.log('✅ PowerSchool CPM activation flag set');
-
     // Get workspace folder - use the first workspace folder as root
     const workspaceFolders = vscode.workspace.workspaceFolders;
     let workspaceRootPath = null;
@@ -1622,13 +1808,16 @@ function activate(context) {
     // Initialize PowerSchool API and Tree Provider
     console.log('🔧 Initializing PowerSchool API and Tree Provider...');
     const api = new PowerSchoolAPI();
+    console.log('✅ PowerSchool API created');
     const treeProvider = new PowerSchoolTreeProvider(api, pluginFilesRoot);
+    console.log('✅ Tree Provider created');
     
     // Store globally for cleanup
     global.powerschoolCpmTreeProvider = treeProvider;
     console.log('📂 Tree provider created');
 
     // Watch for workspace changes to update the tree provider
+    console.log('👀 Setting up workspace watcher...');
     const workspaceWatcher = vscode.workspace.onDidChangeWorkspaceFolders(() => {
         const workspaceFolders = vscode.workspace.workspaceFolders;
         let newWorkspaceRootPath = null;
@@ -1691,7 +1880,28 @@ function activate(context) {
         
         // Store globally for cleanup
         global.powerschoolCpmTreeView = treeView;
-        console.log('🌲 Tree view created successfully');
+        
+        // Register file decoration provider to color file/folder labels
+        const fileDecorator = vscode.window.registerFileDecorationProvider({
+            provideFileDecoration(uri) {
+                if (uri.scheme === 'plugin') {
+                    // Plugin files/folders get purple text
+                    return {
+                        color: new vscode.ThemeColor('symbolIcon.interfaceForeground'),
+                        tooltip: 'Plugin File'
+                    };
+                } else if (uri.scheme === 'custom') {
+                    // Custom non-plugin files/folders get blue text
+                    return {
+                        color: new vscode.ThemeColor('symbolIcon.classForeground'),
+                        tooltip: 'Custom File'
+                    };
+                }
+                return undefined;
+            }
+        });
+        context.subscriptions.push(fileDecorator);
+        console.log('🎨 File decoration provider registered for custom and plugin files');
         
     } catch (error) {
         console.error('❌ Failed to create tree view ps-vscode-cpm-explorer:', error.message);
@@ -2604,9 +2814,6 @@ function activate(context) {
 function deactivate() {
     // Clean up any resources if needed
     console.log('PowerSchool CPM extension deactivated');
-    
-    // Clear activation flag and cached data
-    global.powerschoolCpmActivated = false;
     
     // Dispose tree view
     if (global.powerschoolCpmTreeView) {

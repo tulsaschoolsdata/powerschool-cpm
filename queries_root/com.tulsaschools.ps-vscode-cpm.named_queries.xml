@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<queries>
+    <query name="org.tulsaschools.plugin.file.mappings" coreTable="psm_asset" flattened="true">
+        <description>Maps PowerSchool CPM files to their plugins for ps-vscode-cpm extension</description>
+        <columns>
+            <column column="PLUGINDEF.ID">pluginid</column>
+            <column column="PLUGINDEF.NAME">pluginname</column>
+            <column column="PLUGINDEF.DESCRIPTION">plugindescription</column>
+            <column column="PLUGINDEF.VERSION">pluginversion</column>
+            <column column="PLUGINDEF.ISENABLED">enabled</column>
+            <column column="PSM_ASSET.NAME">filename</column>
+            <column column="PSM_ASSETFOLDER.ID">cpmpath</column>
+        </columns>
+        <sql>
+            <![CDATA[
+            SELECT DISTINCT
+                pd.ID,
+                pd.NAME,
+                pd.DESCRIPTION,
+                pd.VERSION,
+                pd.ISENABLED AS enabled,
+                pa.NAME AS filename,
+                SUBSTR(psmaf.pathname, 10) AS cpmpath
+            FROM PLUGINDEF pd
+            JOIN PLUGINDEFASSET pda ON pd.ID = pda.PLUGINDEFID
+            JOIN PSM_ASSET pa ON pda.ASSETID = pa.ID
+            JOIN (
+                SELECT 
+                    id, 
+                    SYS_CONNECT_BY_PATH(NAME, '/') pathname
+                FROM PSM_ASSETFOLDER
+                START WITH LOWER(NAME) = 'web_root'
+                CONNECT BY PRIOR id = parentassetfolder_id
+            ) psmaf ON pa.ASSETFOLDER_ID = psmaf.id
+            ORDER BY pd.NAME, cpmpath, filename
+            ]]>
+        </sql>
+    </query>
+</queries>
