@@ -18,6 +18,7 @@ A VS Code extension that provides seamless integration with PowerSchool's Custom
 1. **Install the Extension**: Install this extension in VS Code
 2. **Configure Environment Variables**: See AUTH_SETUP.md
 3. **Open Workspace**: Open any folder in VS Code to use as your PowerSchool development workspace
+    When developing a plugin, web_root must be
 
 ## Extension Settings
 
@@ -35,7 +36,7 @@ This extension contributes the following settings:
 
 ## Commands
 
-Access these commands via the Command Palette (Ctrl+Shift+P):
+Access these commands via the Command Palette (Ctrl+Shift+P): or the context Menu.
 
 <img width="409" height="301" alt="image" src="https://github.com/user-attachments/assets/1d68bfd5-dc7c-4f68-8c11-98c2c5febfe1" />
 
