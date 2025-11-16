@@ -353,26 +353,36 @@ class PowerSchoolTreeProvider {
     
     async downloadFile(treeItem) {
         try {
-            // Create local path that mirrors PowerSchool structure
+            // Create local path that mirrors PowerSchool structure within the plugin files root
+            // this.localRootPath already points to web_root if it exists, or workspace root otherwise
             const localFilePath = path.join(this.localRootPath, treeItem.remotePath.replace(/^\/+/g, ''));
+            
+            console.log(`📥 Downloading: ${treeItem.remotePath}`);
+            console.log(`   Plugin files root: ${this.localRootPath}`);
+            console.log(`   Target file path: ${localFilePath}`);
             
             const localDir = path.dirname(localFilePath);
             if (!fs.existsSync(localDir)) {
                 fs.mkdirSync(localDir, { recursive: true });
-                console.log(`📁 Created directory: ${path.relative(this.localRootPath, localDir)}`);
+                console.log(`📁 Created directory: ${localDir}`);
+            } else {
+                console.log(`📁 Directory exists: ${localDir}`);
             }
             
-            console.log(`📥 Downloading: ${treeItem.remotePath}`);
-            console.log(`💾 Local path: ${path.relative(this.localRootPath, localFilePath)}`);
             vscode.window.showInformationMessage(`Downloading ${treeItem.label}...`);
             
             const fileContent = await this.downloadFileContent(treeItem.remotePath);
+            
+            // Check if file already exists
+            const fileExists = fs.existsSync(localFilePath);
+            console.log(`   File ${fileExists ? 'EXISTS' : 'NEW'}: ${localFilePath}`);
+            
             fs.writeFileSync(localFilePath, fileContent);
             
             console.log(`✅ Downloaded: ${treeItem.remotePath}`);
             const relativeLocalPath = path.relative(this.localRootPath, localFilePath);
             vscode.window.showInformationMessage(
-                `Downloaded ${treeItem.label} to ${relativeLocalPath}`
+                `${fileExists ? 'Updated' : 'Downloaded'} ${treeItem.label} to ${relativeLocalPath}`
             );
             
             this._onDidChangeTreeData.fire(treeItem);
@@ -1677,29 +1687,53 @@ class PowerSchoolAPI {
 }
 
 // Helper function to get the actual root path for PowerSchool files
-// Checks for web_root subdirectory or uses workspace root
+// Supports multiple workspace configurations:
+// 1. Plugin dev mode: workspace/src/web_root (set pluginWebRoot to "src/web_root")
+// 2. Plugin root mode: workspace/web_root (set pluginWebRoot to "web_root") 
+// 3. Direct mode: workspace is already the plugin root (set pluginWebRoot to "")
 function getPluginFilesRoot(workspaceRoot) {
     if (!workspaceRoot) return null;
     
     const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
-    const webRootSubdir = config.get('pluginWebRoot') || 'web_root';
+    let pluginRootPath = config.get('pluginWebRoot') || 'web_root';
     
-    // If setting is empty, use workspace root directly
-    if (!webRootSubdir || webRootSubdir.trim() === '') {
-        console.log(`📁 Using workspace root for plugin files: ${workspaceRoot}`);
+    // If setting is empty string, use workspace root directly (already at plugin root)
+    if (!pluginRootPath || pluginRootPath.trim() === '') {
+        console.log(`📁 Using workspace root as plugin root: ${workspaceRoot}`);
         return workspaceRoot;
     }
     
-    // Check if web_root subdirectory exists
-    const webRootPath = path.join(workspaceRoot, webRootSubdir);
-    if (fs.existsSync(webRootPath) && fs.statSync(webRootPath).isDirectory()) {
-        console.log(`📁 Found plugin web_root directory: ${webRootPath}`);
-        return webRootPath;
+    // Check if pluginRootPath contains "web_root" - if so, this is the full path
+    // Otherwise, append "/web_root" to create the full path
+    let fullPluginPath;
+    if (pluginRootPath.endsWith('web_root') || pluginRootPath.includes('web_root/')) {
+        // Path already includes web_root: "src/web_root" or "web_root"
+        fullPluginPath = path.join(workspaceRoot, pluginRootPath);
+    } else {
+        // Path is just the plugin root: "src" -> "src/web_root"
+        fullPluginPath = path.join(workspaceRoot, pluginRootPath, 'web_root');
     }
     
-    // web_root doesn't exist - ask user if they want to create it
-    console.log(`⚠️  Plugin web_root directory not found: ${webRootPath}`);
-    console.log(`📁 Using workspace root instead: ${workspaceRoot}`);
+    // Check if the calculated path exists
+    if (fs.existsSync(fullPluginPath) && fs.statSync(fullPluginPath).isDirectory()) {
+        console.log(`✅ Found plugin web_root: ${fullPluginPath}`);
+        console.log(`   (Workspace: ${workspaceRoot})`);
+        console.log(`   (Setting: ${pluginRootPath})`);
+        return fullPluginPath;
+    }
+    
+    // Path doesn't exist - provide helpful guidance
+    console.warn(`⚠️  Plugin web_root not found: ${fullPluginPath}`);
+    console.warn(`⚠️  Current workspace: ${workspaceRoot}`);
+    console.warn(`⚠️  Setting value: "${pluginRootPath}"`);
+    console.warn(`⚠️  `);
+    console.warn(`⚠️  To fix this, set ps-vscode-cpm.pluginWebRoot to:`);
+    console.warn(`⚠️    "" (empty) - if workspace is already at plugin root`);
+    console.warn(`⚠️    "web_root" - if workspace/web_root exists`);
+    console.warn(`⚠️    "src" - if workspace/src/web_root exists (plugin dev mode)`);
+    console.warn(`⚠️    "src/web_root" - explicit path to web_root`);
+    console.warn(`⚠️  `);
+    console.warn(`⚠️  Falling back to workspace root`);
     return workspaceRoot;
 }
 
