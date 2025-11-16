@@ -363,7 +363,7 @@
         "ps-vscode-cpm.pluginWebRoot": {
           "type": "string",
           "default": "web_root",
-          "description": "Subdirectory within workspace for PowerSchool plugin files (e.g., 'web_root'). Leave empty to use workspace root."
+          "description": "Path to web_root directory relative to workspace. Options: \"\" (workspace is plugin root), \"web_root\" (workspace/web_root), \"src\" (workspace/src/web_root), or \"src/web_root\" (explicit path)."
         },
         "ps-vscode-cpm.autoSync": {
           "type": "boolean",
