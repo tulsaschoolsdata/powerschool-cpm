@@ -2,7 +2,7 @@
   "name": "ps-vscode-cpm",
   "displayName": "ps-vscode-cpm",
   "description": "Manage custom pages in PowerSchool",
-  "version": "2.5.1",
+  "version": "2.6.0",
   "publisher": "zuvy",
   "engines": {
     "vscode": "^1.104.0"
@@ -14,11 +14,6 @@
     "type": "git",
     "url": "https://github.com/zuvy/ps-vscode-cpm.git"
   },
-  "activationEvents": [
-    "onView:ps-vscode-cpm-explorer",
-    "onCommand:ps-vscode-cpm.refresh",
-    "onCommand:ps-vscode-cpm.openSettings"
-  ],
   "main": "./extension.js",
   "contributes": {
     "commands": [
@@ -197,7 +192,7 @@
       "view/item/context": [
         {
           "command": "ps-vscode-cpm.publishFile",
-          "when": "view == ps-vscode-cpm-explorer && viewItem == file",
+          "when": "view == ps-vscode-cpm-explorer && (viewItem == file || viewItem == file-custom || viewItem == file-custom-plugin)",
           "group": "inline"
         }
       ],
@@ -368,7 +363,7 @@
         "ps-vscode-cpm.pluginWebRoot": {
           "type": "string",
           "default": "web_root",
-          "description": "Subdirectory within workspace for PowerSchool plugin files (e.g., 'web_root'). Leave empty to use workspace root."
+          "description": "Path to web_root directory relative to workspace. Options: \"\" (workspace is plugin root), \"web_root\" (workspace/web_root), \"src\" (workspace/src/web_root), or \"src/web_root\" (explicit path)."
         },
         "ps-vscode-cpm.autoSync": {
           "type": "boolean",
