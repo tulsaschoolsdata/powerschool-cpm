@@ -404,12 +404,13 @@ class PowerSchoolTreeProvider {
             path: filePath
         });
         
-        await this.psApi.ensureAuthenticated();
+        const endpoint = '/ws/cpm/builtintext';
+        await this.psApi.ensureAuthenticated(endpoint);
         
         const options = {
             hostname: new URL(this.psApi.baseUrl).hostname,
             port: 443,
-            path: `/ws/cpm/builtintext?${queryParams.toString()}`,
+            path: `${endpoint}?${queryParams.toString()}`,
             method: 'GET',
             rejectUnauthorized: false, // Accept self-signed certificates
             headers: {
