@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <queries>
-    <query name="org.tulsaschools.plugin.file.mappings" coreTable="psm_asset" flattened="true">
+    <query name="org.ps.plugin.file.mapping" coreTable="psm_asset" flattened="true">
         <description>Maps PowerSchool CPM files to their plugins for ps-vscode-cpm extension</description>
         <columns>
             <column column="PLUGINDEF.ID">pluginid</column>
