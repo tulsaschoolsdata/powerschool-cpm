@@ -1687,55 +1687,31 @@ class PowerSchoolAPI {
     }
 }
 
-// Helper function to get the actual root path for PowerSchool files
-// Supports multiple workspace configurations:
-// 1. Plugin dev mode: workspace/src/web_root (set pluginWebRoot to "src/web_root")
-// 2. Plugin root mode: workspace/web_root (set pluginWebRoot to "web_root") 
-// 3. Direct mode: workspace is already the plugin root (set pluginWebRoot to "")
+// Helper function to get the actual root path for PowerSchool plugin files
+// 1. If pluginWebRoot is blank, use workspace root
+// 2. If set, use that directory as plugin root (plugin.xml and web_root are inside)
 function getPluginFilesRoot(workspaceRoot) {
     if (!workspaceRoot) return null;
-    
     const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
-    let pluginRootPath = config.get('pluginWebRoot') || 'web_root';
-    
-    // If setting is empty string, use workspace root directly (already at plugin root)
+    let pluginRootPath = config.get('pluginWebRoot');
     if (!pluginRootPath || pluginRootPath.trim() === '') {
         console.log(`📁 Using workspace root as plugin root: ${workspaceRoot}`);
         return workspaceRoot;
     }
-    
-    // Check if pluginRootPath contains "web_root" - if so, this is the full path
-    // Otherwise, append "/web_root" to create the full path
-    let fullPluginPath;
-    if (pluginRootPath.endsWith('web_root') || pluginRootPath.includes('web_root/')) {
-        // Path already includes web_root: "src/web_root" or "web_root"
-        fullPluginPath = path.join(workspaceRoot, pluginRootPath);
-    } else {
-        // Path is just the plugin root: "src" -> "src/web_root"
-        fullPluginPath = path.join(workspaceRoot, pluginRootPath, 'web_root');
+    const fullPluginRoot = path.join(workspaceRoot, pluginRootPath);
+    if (fs.existsSync(fullPluginRoot) && fs.statSync(fullPluginRoot).isDirectory()) {
+        console.log(`✅ Found plugin root: ${fullPluginRoot}`);
+        return fullPluginRoot;
     }
-    
-    // Check if the calculated path exists
-    if (fs.existsSync(fullPluginPath) && fs.statSync(fullPluginPath).isDirectory()) {
-        console.log(`✅ Found plugin web_root: ${fullPluginPath}`);
-        console.log(`   (Workspace: ${workspaceRoot})`);
-        console.log(`   (Setting: ${pluginRootPath})`);
-        return fullPluginPath;
-    }
-    
-    // Path doesn't exist - provide helpful guidance
-    console.warn(`⚠️  Plugin web_root not found: ${fullPluginPath}`);
-    console.warn(`⚠️  Current workspace: ${workspaceRoot}`);
-    console.warn(`⚠️  Setting value: "${pluginRootPath}"`);
-    console.warn(`⚠️  `);
-    console.warn(`⚠️  To fix this, set ps-vscode-cpm.pluginWebRoot to:`);
-    console.warn(`⚠️    "" (empty) - if workspace is already at plugin root`);
-    console.warn(`⚠️    "web_root" - if workspace/web_root exists`);
-    console.warn(`⚠️    "src" - if workspace/src/web_root exists (plugin dev mode)`);
-    console.warn(`⚠️    "src/web_root" - explicit path to web_root`);
-    console.warn(`⚠️  `);
+    console.warn(`⚠️  Plugin root not found: ${fullPluginRoot}`);
     console.warn(`⚠️  Falling back to workspace root`);
     return workspaceRoot;
+}
+
+// Helper to get the path to plugin.xml in the plugin root
+function getPluginXmlPath(workspaceRoot) {
+    const pluginRoot = getPluginFilesRoot(workspaceRoot);
+    return path.join(pluginRoot, 'plugin.xml');
 }
 
 // Helper function to parse version from plugin.xml
@@ -2480,14 +2456,12 @@ function activate(context) {
             }
             
             const workspaceRoot = workspaceFolders[0].uri.fsPath;
-            const pluginXmlPath = path.join(workspaceRoot, 'plugin.xml');
-            
+            const pluginXmlPath = getPluginXmlPath(workspaceRoot);
             // Check if plugin.xml exists
             if (!fs.existsSync(pluginXmlPath)) {
-                vscode.window.showErrorMessage('plugin.xml not found in workspace root. This command is for packaging PowerSchool plugins.');
+                vscode.window.showErrorMessage('plugin.xml not found in plugin root. This command is for packaging PowerSchool plugins.');
                 return;
             }
-            
             // Parse current version from plugin.xml
             const currentVersion = parsePluginVersion(pluginXmlPath);
             console.log(`📦 Current plugin version: ${currentVersion}`);
@@ -2582,8 +2556,10 @@ function activate(context) {
                 'MessageKeys', 'messagekeys',
                 'pagecataloging', 'PageCataloging'
             ];
+            // Directories to include are relative to the plugin root
+            const pluginRoot = getPluginFilesRoot(workspaceRoot);
             const dirsToInclude = potentialDirs.filter(dir => {
-                const dirPath = path.join(workspaceRoot, dir);
+                const dirPath = path.join(pluginRoot, dir);
                 return fs.existsSync(dirPath) && fs.statSync(dirPath).isDirectory();
             });
             
@@ -2621,7 +2597,7 @@ function activate(context) {
             
             // Create the ZIP file
             vscode.window.showInformationMessage('Creating plugin package...');
-            const zipFilePath = await createPluginZip(workspaceRoot, pluginName, versionToUse, uniqueDirs);
+            const zipFilePath = await createPluginZip(pluginRoot, pluginName, versionToUse, uniqueDirs);
             
             const zipFileName = path.basename(zipFilePath);
             const openFolder = await vscode.window.showInformationMessage(
