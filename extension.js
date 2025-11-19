@@ -31,7 +31,7 @@ function generateMultipartData(fields, boundary) {
 
 
 class PowerSchoolTreeItem extends vscode.TreeItem {
-    constructor(label, collapsibleState, resourceUri, contextValue, remotePath, psApi, localRootPath, isCustom = false, pluginInfo = null) {
+    constructor(label, collapsibleState, resourceUri, contextValue, remotePath, psApi, localRootPath, isCustom = false, pluginInfo = null, hasPluginInfo = false) {
         super(label, collapsibleState);
         this.resourceUri = resourceUri;
         this.contextValue = contextValue;
@@ -40,14 +40,15 @@ class PowerSchoolTreeItem extends vscode.TreeItem {
         this.localRootPath = localRootPath;
         this.isCustom = isCustom;
         this.pluginInfo = pluginInfo;  // { pluginId, pluginName, enabled }
-        
+        this.hasPluginInfo = hasPluginInfo; // Whether this item has plugin info (direct or inherited)
+
         // Update contextValue to include custom and plugin status
         if (isCustom && pluginInfo) {
             this.contextValue = contextValue === 'file' ? 'file-custom-plugin' : 'folder-custom-plugin';
         } else if (isCustom) {
             this.contextValue = contextValue === 'file' ? 'file-custom' : 'folder-custom';
         }
-        
+
         if (contextValue === 'file') {
             this.command = {
                 command: 'ps-vscode-cpm.downloadFile',
@@ -55,39 +56,44 @@ class PowerSchoolTreeItem extends vscode.TreeItem {
                 arguments: [this]
             };
             this.iconPath = this.getFileIcon();
+            
+            // Override resourceUri for FILES to enable colored icons
+            if (isCustom && pluginInfo) {
+                this.resourceUri = vscode.Uri.parse(`plugin:${label}`);
+            } else if (isCustom) {
+                this.resourceUri = vscode.Uri.parse(`custom:${label}`);
+            }
         } else {
+            // For FOLDERS, keep the file-based resourceUri so FileDecorationProvider can work
             this.iconPath = this.getFolderIcon();
+            // Don't override resourceUri - it's already set from the constructor parameter
         }
-        
-        // Add color to custom file/folder labels via resourceUri scheme
-        if (isCustom && pluginInfo) {
-            // Plugin files/folders get purple text
-            this.resourceUri = vscode.Uri.parse(`plugin:${label}`);
-        } else if (isCustom) {
-            // Custom non-plugin files/folders get blue text
-            this.resourceUri = vscode.Uri.parse(`custom:${label}`);
-        }
-        
+
         // Enhanced tooltip with custom status and plugin info
         let customStatus = '';
+        let descriptionText = '';
         if (isCustom && pluginInfo) {
             const enabledStatus = pluginInfo.enabled ? '' : ' (Disabled)';
             customStatus = ` (Plugin: ${pluginInfo.pluginName}${enabledStatus})`;
+            descriptionText = `● ${pluginInfo.pluginName}`;
         } else if (isCustom) {
             customStatus = ' (Custom - No Plugin)';
+            descriptionText = '● custom';
         } else {
             customStatus = ' (Original PowerSchool)';
         }
-        
+
         this.tooltip = contextValue === 'file' ? 
             `${label}${customStatus}\nClick to download from PowerSchool` :
             `${label}${customStatus}`;
+        
+        // Don't set description for folders - keep folder names clean
+        // Plugin info will only show in tooltip on hover
     }
     
     getFileIcon() {
         const localPath = path.join(this.localRootPath, this.remotePath.replace(/^\/+/g, ''));
         const exists = fs.existsSync(localPath);
-        
         // Plugin-controlled custom files get purple/magenta color
         if (this.isCustom && this.pluginInfo) {
             if (exists) {
@@ -116,19 +122,22 @@ class PowerSchoolTreeItem extends vscode.TreeItem {
             }
         }
     }
-    
+
     getFolderIcon() {
-        // Plugin folders get purple color
+        const path = require('path');
+        const extensionPath = path.dirname(__filename);
+        
+        // Use custom SVG icons for different folder types
         if (this.isCustom && this.pluginInfo) {
-            return new vscode.ThemeIcon('folder', new vscode.ThemeColor('symbolIcon.interfaceForeground'));
+            // Plugin folders - purple icon
+            return path.join(extensionPath, 'resources', 'icons', 'folder-plugin.svg');
+        } else if (this.isCustom) {
+            // Custom non-plugin folders - blue icon
+            return path.join(extensionPath, 'resources', 'icons', 'folder-custom.svg');
         }
-        // Custom folders get blue color  
-        else if (this.isCustom) {
-            return new vscode.ThemeIcon('folder', new vscode.ThemeColor('symbolIcon.classForeground'));
-        } else {
-            // Original folders - default (gray)
-            return new vscode.ThemeIcon('folder');
-        }
+        
+        // Stock folders - gray icon
+        return path.join(extensionPath, 'resources', 'icons', 'folder-stock.svg');
     }
 }
 
@@ -140,13 +149,17 @@ class PowerSchoolTreeProvider {
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
         this.treeCache = new Map();
         this.pluginMappings = null;  // Cache for plugin file mappings
+        this.pluginFilePaths = null;  // Set of actual file paths (not folders)
         this.pluginMappingsLoaded = false;
+        this.folderDecorations = new Map();  // Track folder decoration types by path
     }
     
     refresh() {
         this.treeCache.clear();
         this.pluginMappings = null;  // Clear plugin mappings cache
+        this.pluginFilePaths = null;  // Clear file paths cache
         this.pluginMappingsLoaded = false;
+        this.folderDecorations.clear();  // Clear folder decorations
         this._onDidChangeTreeData.fire();
     }
     
@@ -158,6 +171,7 @@ class PowerSchoolTreeProvider {
         try {
             const mappings = await this.psApi.getPluginFileMappings();
             this.pluginMappings = new Map();
+            this.pluginFilePaths = new Set();  // Track actual file paths
             
             // Build a map of file path to plugin info
             for (const mapping of mappings) {
@@ -171,12 +185,23 @@ class PowerSchoolTreeProvider {
                         enabled: mapping.enabled === '1' || mapping.enabled === 1 || mapping.enabled === true
                     };
                     
-                    // Map the full file path
+                    // Map the full file path and track it as an actual file
                     this.pluginMappings.set(fullPath, pluginData);
+                    this.pluginFilePaths.add(fullPath);  // Mark as actual file
                     
-                    // Also map the folder path to indicate it contains plugin files
+                    // Map the immediate folder path
                     if (!this.pluginMappings.has(folderPath)) {
                         this.pluginMappings.set(folderPath, pluginData);
+                    }
+                    
+                    // Map ALL parent folder paths (e.g., /admin/META for /admin/META/dat_reference)
+                    const pathParts = folderPath.split('/').filter(p => p);
+                    let currentPath = '';
+                    for (const part of pathParts) {
+                        currentPath += '/' + part;
+                        if (!this.pluginMappings.has(currentPath)) {
+                            this.pluginMappings.set(currentPath, pluginData);
+                        }
                     }
                 }
             }
@@ -256,11 +281,13 @@ class PowerSchoolTreeProvider {
                 const rootTree = await this.psApi.getFolderTree('/', 1);
                 
                 if (rootTree.folder) {
-                    return await this.createTreeItems(rootTree.folder, '/');
+                    return await this.createTreeItems(rootTree.folder, '/', null);
                 }
                 return [];
             } else if (element.contextValue === 'folder' || element.contextValue === 'folder-custom' || element.contextValue === 'folder-custom-plugin') {
-                const cacheKey = element.remotePath;
+                // Include pluginInfo in cache key to ensure different versions are cached separately
+                const pluginKey = element.pluginInfo ? element.pluginInfo.pluginName : 'none';
+                const cacheKey = `${element.remotePath}:${pluginKey}`;
                 
                 if (this.treeCache.has(cacheKey)) {
                     return this.treeCache.get(cacheKey);
@@ -269,7 +296,10 @@ class PowerSchoolTreeProvider {
                 const folderTree = await this.psApi.getFolderTree(element.remotePath, 1);
                 
                 if (folderTree.folder) {
-                    const items = await this.createTreeItems(folderTree.folder, element.remotePath);
+                    // Only pass plugin info to children if this folder is actually custom
+                    // Stock folders should not propagate plugin info to their children
+                    const pluginInfoToPass = element.isCustom ? element.pluginInfo : null;
+                    const items = await this.createTreeItems(folderTree.folder, element.remotePath, pluginInfoToPass);
                     this.treeCache.set(cacheKey, items);
                     return items;
                 }
@@ -283,56 +313,87 @@ class PowerSchoolTreeProvider {
         }
     }
     
-    async createTreeItems(folderData, currentPath) {
+    async createTreeItems(folderData, currentPath, parentPluginInfo = null) {
         const items = [];
-        
+
         // Load plugin mappings if not already loaded
-        console.log(`🔄 About to load plugin mappings...`);
         const pluginMappings = await this.loadPluginMappings();
-        console.log(`✅ Plugin mappings loaded, size: ${pluginMappings.size}`);
-        
+        const normalizedCurrentPath = currentPath.toLowerCase();
+
         // Sort subfolders alphabetically and add to items
         if (folderData.subFolders) {
-            const sortedSubfolders = [...folderData.subFolders].sort((a, b) => 
+            const sortedSubfolders = [...folderData.subFolders].sort((a, b) =>
                 a.text.toLowerCase().localeCompare(b.text.toLowerCase())
             );
-            
+
             for (const subfolder of sortedSubfolders) {
                 const folderPath = currentPath === '/' ? `/${subfolder.text}` : `${currentPath}/${subfolder.text}`;
                 const normalizedPath = folderPath.toLowerCase();
-                const pluginInfo = pluginMappings.get(normalizedPath) || null;
                 
-                // Debug logging for folders
+                // Only use plugin info for CUSTOM items
+                // Stock items should never show plugin info, even if they're in a plugin folder
+                let effectivePluginInfo = null;
                 if (subfolder.custom) {
-                    console.log(`📂 Folder: ${folderPath}, Custom: ${subfolder.custom}, Plugin: ${pluginInfo ? pluginInfo.pluginName : 'none'}`);
+                    // Check if this folder is directly mapped to a plugin
+                    const directPluginInfo = pluginMappings.get(normalizedPath) || null;
+                    
+                    // Determine which plugin info to use:
+                    // 1. If this folder has direct plugin mapping, use it (overrides parent)
+                    // 2. Otherwise inherit parent's plugin info (if parent is also custom)
+                    effectivePluginInfo = directPluginInfo || parentPluginInfo;
+
+                    console.log(`📂 Folder: ${folderPath}, Custom: ${subfolder.custom}, Plugin: ${effectivePluginInfo ? effectivePluginInfo.pluginName : 'none'}, Direct: ${directPluginInfo ? 'yes' : 'no'}, Inherited: ${parentPluginInfo ? 'yes' : 'no'}`);
                 }
+
+                // Create a URI for the folder so it can be decorated
+                const folderUri = vscode.Uri.file(path.join(this.localRootPath, folderPath.replace(/^\/+/g, '')));
                 
                 const item = new PowerSchoolTreeItem(
                     subfolder.text,
                     vscode.TreeItemCollapsibleState.Collapsed,
-                    null,
+                    folderUri,
                     'folder',
                     folderPath,
                     this.psApi,
                     this.localRootPath,
-                    subfolder.custom || false,  // Pass custom property from API
-                    pluginInfo  // Pass plugin info if available
+                    subfolder.custom,  // Only mark as custom if PowerSchool says it's custom
+                    effectivePluginInfo,  // Only pass plugin info if item is custom
+                    effectivePluginInfo !== null // Pass true if has plugin info
                 );
+                
+                // Store folder decoration type for FileDecorationProvider
+                // Only custom folders (non-stock) should be decorated
+                if (subfolder.custom) {
+                    if (effectivePluginInfo) {
+                        this.folderDecorations.set(folderPath, 'plugin');
+                    } else {
+                        this.folderDecorations.set(folderPath, 'custom');
+                    }
+                }
+                
                 items.push(item);
             }
         }
-        
+
         // Sort pages alphabetically and add to items
         if (folderData.pages) {
-            const sortedPages = [...folderData.pages].sort((a, b) => 
+            const sortedPages = [...folderData.pages].sort((a, b) =>
                 a.text.toLowerCase().localeCompare(b.text.toLowerCase())
             );
-            
+
             for (const page of sortedPages) {
                 const filePath = currentPath === '/' ? `/${page.text}` : `${currentPath}/${page.text}`;
                 const normalizedPath = filePath.toLowerCase();
-                const pluginInfo = pluginMappings.get(normalizedPath) || null;
                 
+                // Only use plugin info for CUSTOM files
+                // Stock files should never show plugin info, even if they're in a plugin folder
+                let effectivePluginInfo = null;
+                if (page.custom) {
+                    // Check if file has direct plugin mapping, otherwise inherit from parent
+                    const directPluginInfo = pluginMappings.get(normalizedPath) || null;
+                    effectivePluginInfo = directPluginInfo || parentPluginInfo;
+                }
+
                 const item = new PowerSchoolTreeItem(
                     page.text,
                     vscode.TreeItemCollapsibleState.None,
@@ -341,13 +402,14 @@ class PowerSchoolTreeProvider {
                     filePath,
                     this.psApi,
                     this.localRootPath,
-                    page.custom || false,  // Pass custom property from API
-                    pluginInfo  // Pass plugin info if available
+                    page.custom,  // Only mark as custom if PowerSchool says it's custom
+                    effectivePluginInfo,  // Only pass plugin info if file is custom
+                    effectivePluginInfo !== null // Pass true if has plugin info
                 );
                 items.push(item);
             }
         }
-        
+
         return items;
     }
     
@@ -1895,19 +1957,48 @@ function activate(context) {
         // Register file decoration provider to color file/folder labels
         const fileDecorator = vscode.window.registerFileDecorationProvider({
             provideFileDecoration(uri) {
+                // Debug logging
+                console.log(`🎨 FileDecorationProvider called: scheme=${uri.scheme}, path=${uri.path}`);
+                
+                // For custom URI schemes (files use this)
                 if (uri.scheme === 'plugin') {
-                    // Plugin files/folders get purple text
+                    console.log('   → Returning PLUGIN decoration');
                     return {
                         color: new vscode.ThemeColor('symbolIcon.interfaceForeground'),
                         tooltip: 'Plugin File'
                     };
                 } else if (uri.scheme === 'custom') {
-                    // Custom non-plugin files/folders get blue text
+                    console.log('   → Returning CUSTOM decoration');
                     return {
                         color: new vscode.ThemeColor('symbolIcon.classForeground'),
                         tooltip: 'Custom File'
                     };
                 }
+                
+                // For folders with file:// scheme, check the decoration map
+                if (uri.scheme === 'file' && treeProvider.folderDecorations && treeProvider.folderDecorations.size > 0) {
+                    console.log(`   → Checking ${treeProvider.folderDecorations.size} folder decorations...`);
+                    // Check decoration map using the folder's remote path
+                    for (const [folderPath, decorationType] of treeProvider.folderDecorations) {
+                        const normalizedFolderPath = folderPath.replace(/^\/+/g, '');
+                        if (uri.path.endsWith(normalizedFolderPath)) {
+                            console.log(`   → MATCH! ${folderPath} → ${decorationType}`);
+                            if (decorationType === 'plugin') {
+                                return {
+                                    color: new vscode.ThemeColor('symbolIcon.interfaceForeground'),
+                                    tooltip: 'Plugin Folder'
+                                };
+                            } else if (decorationType === 'custom') {
+                                return {
+                                    color: new vscode.ThemeColor('symbolIcon.classForeground'),
+                                    tooltip: 'Custom Folder'
+                                };
+                            }
+                        }
+                    }
+                    console.log('   → No match found in decoration map');
+                }
+                
                 return undefined;
             }
         });

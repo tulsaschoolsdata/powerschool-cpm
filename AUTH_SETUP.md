@@ -10,12 +10,12 @@ CPM endpoints appear to be "internal-only" APIs that don't support OAuth.
 ## 🔧 **Setup Steps**
 
 ### **Step 1: Configure Authentication Method**
-1. **Access Plugin**: The ps-vscode-cpm extension requires a basic PowerSchool plugin with oauth to provide client id and secret + Access Level for v1 APIs set to full.
+1. **Access Plugin**: The ps-vscode-cpm extension requires a basic PowerSchool plugin with oauth to provide client id and secret + Access Level for v1 APIs set to full. Add the included query to your existing oauth plugin, or create a new one.
 2. **Access Account**; The ps-vscode-cpm extension requires an active admin account.
   - **Suggestion**: Set up a service account specifically for this plugin.
 4. Install the plugin.
 5. **Open VS Code Settings**: `Cmd+,` (Mac) or `Ctrl+,` (Windows/Linux)
-6. **Search**: "PowerSchool CPM"
+6. **Search**: "ps-vscode-cpm"
 8. **Set Authentication Method**: Choose **"hybrid"**
 
 ### **Step 2: Configure Credentials**
