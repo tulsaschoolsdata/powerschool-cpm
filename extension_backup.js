@@ -594,37 +594,1140 @@ class PowerSchoolTreeProvider {
     }
 }
 
+// PowerSchoolAPI class removed - now imported from ./src/powerschool-api.js
+
 // Helper function to get the actual root path for PowerSchool plugin files
-// 1. If pluginWebRoot setting is blank, auto-detect web_root folder
-// 2. If web_root folder exists, use it as the base for all file operations
-// 3. Otherwise fall back to workspace root
+
+    validateCredentials() {
+        const hasOAuth = this.baseUrl && this.clientId && this.clientSecret;
+        const hasSession = this.baseUrl && this.username && this.password;
+        
+        if (this.authMethod === 'oauth' && !hasOAuth) {
+            console.warn('PowerSchool CPM: OAuth credentials not configured. Please configure client ID and secret in VS Code settings.');
+        } else if (this.authMethod === 'session' && !hasSession) {
+            console.warn('PowerSchool CPM: Session credentials not configured. Please configure username and password in VS Code settings.');
+        } else if (this.authMethod === 'hybrid') {
+            if (!hasOAuth) {
+                console.warn('PowerSchool CPM: OAuth credentials missing for hybrid mode. Please configure client ID and secret.');
+            }
+            if (!hasSession) {
+                console.warn('PowerSchool CPM: Session credentials missing for hybrid mode. Please configure username and password.');
+            }
+        }
+    }
+
+    // Clear authentication state and reload configuration
+    clearAuth() {
+        console.log('🔒 Clearing PowerSchool authentication state...');
+        // Clear OAuth state
+        this.accessToken = null;
+        this.tokenExpiry = 0;
+        // Clear session state
+        this.sessionValid = false;
+        this.lastSessionCheck = 0;
+        this.cookies.clear();
+        
+        // Reload configuration from VS Code settings
+        this.reloadConfig();
+    }
+
+    // Reload configuration from VS Code settings
+    reloadConfig() {
+        console.log('⚙️ Reloading PowerSchool configuration from VS Code settings...');
+        const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
+        this.baseUrl = config.get('serverUrl');
+        this.clientId = config.get('clientId');
+        this.clientSecret = config.get('clientSecret');
+        this.username = config.get('username');
+        this.password = config.get('password');
+        this.authMethod = config.get('authMethod') || 'oauth';
+        
+        this.validateCredentials();
+        console.log(`📡 PowerSchool configuration loaded: ${this.baseUrl} (method: ${this.authMethod})`);
+    }
+
+    // OAuth token request
+    async requestAccessToken() {
+        console.log('🔐 Requesting OAuth access token...');
+        
+        const credentials = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
+        const postData = new URLSearchParams({
+            grant_type: 'client_credentials'
+        }).toString();
+
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: '/oauth/access_token',
+            method: 'POST',
+            rejectUnauthorized: false, // Accept self-signed certificates
+            headers: {
+                'Authorization': `Basic ${credentials}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Length': Buffer.byteLength(postData),
+                'User-Agent': 'ps-vscode-cpm/2.5.0'
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => {
+                    data += chunk;
+                });
+                res.on('end', () => {
+                    try {
+                        if (res.statusCode === 200) {
+                            const tokenData = JSON.parse(data);
+                            this.accessToken = tokenData.access_token;
+                            this.tokenType = tokenData.token_type || 'Bearer';
+                            // Set expiry time (subtract 60 seconds for safety margin)
+                            this.tokenExpiry = Date.now() + ((tokenData.expires_in - 60) * 1000);
+                            console.log('✅ OAuth token acquired successfully');
+                            resolve(true);
+                        } else {
+                            console.error('❌ OAuth token request failed:', res.statusCode, data);
+                            reject(new Error(`OAuth authentication failed: ${res.statusCode} ${data}`));
+                        }
+                    } catch (error) {
+                        console.error('❌ Error parsing OAuth response:', error);
+                        reject(error);
+                    }
+                });
+            });
+            req.on('error', (error) => {
+                console.error('❌ OAuth request error:', error);
+                reject(error);
+            });
+            req.write(postData);
+            req.end();
+        });
+    }
+
+    // Get authorization header for API requests
+    getAuthHeader() {
+        if (!this.accessToken) return '';
+        return `${this.tokenType} ${this.accessToken}`;
+    }
+
+    // Session-based authentication methods
+    parseCookies(cookieHeaders) {
+        if (!cookieHeaders) return;
+        
+        for (const cookie of cookieHeaders) {
+            const [nameValue] = cookie.split(';');
+            const [name, value] = nameValue.split('=');
+            if (name && value) {
+                this.cookies.set(name.trim(), value.trim());
+            }
+        }
+    }
+
+    getCookieHeader() {
+        if (this.cookies.size === 0) return '';
+        
+        const cookieStrings = [];
+        for (const [name, value] of this.cookies) {
+            cookieStrings.push(`${name}=${value}`);
+        }
+        return cookieStrings.join('; ');
+    }
+
+    async getLoginPage() {
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: '/admin/pw.html',
+            method: 'GET',
+            rejectUnauthorized: false,
+            headers: {
+                'User-Agent': 'ps-vscode-cpm/2.5.0'
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                this.parseCookies(res.headers['set-cookie']);
+                resolve();
+            });
+            req.on('error', reject);
+            req.end();
+        });
+    }
+
+    async submitLogin() {
+        const postData = new URLSearchParams({
+            username: this.username,
+            password: this.password,
+            ldappassword: this.password,
+            request_locale: 'en_US'
+        }).toString();
+
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: '/admin/home.html',
+            method: 'POST',
+            rejectUnauthorized: false,
+            headers: {
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Length': Buffer.byteLength(postData),
+                'Cookie': this.getCookieHeader(),
+                'Referer': `${this.baseUrl}/admin/pw.html`
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                this.parseCookies(res.headers['set-cookie']);
+                
+                if (res.statusCode === 200 || res.statusCode === 302) {
+                    this.sessionValid = true;
+                    this.lastSessionCheck = Date.now();
+                    resolve(true);
+                } else {
+                    resolve(false);
+                }
+            });
+            req.on('error', reject);
+            req.write(postData);
+            req.end();
+        });
+    }
+
+    async checkSession() {
+        if (this.sessionValid && (Date.now() - this.lastSessionCheck < this.sessionCheckInterval)) {
+            return true;
+        }
+
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: '/admin/customization/home.html',
+            method: 'GET',
+            rejectUnauthorized: false,
+            headers: {
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                'Cookie': this.getCookieHeader()
+            }
+        };
+
+        return new Promise((resolve) => {
+            const req = https.request(options, (res) => {
+                this.lastSessionCheck = Date.now();
+                this.parseCookies(res.headers['set-cookie']);
+                
+                if (res.statusCode === 200) {
+                    this.sessionValid = true;
+                    resolve(true);
+                } else {
+                    this.sessionValid = false;
+                    resolve(false);
+                }
+            });
+            req.on('error', () => {
+                this.sessionValid = false;
+                resolve(false);
+            });
+            req.end();
+        });
+    }
+
+    async ensureSessionAuthenticated() {
+        let isLoggedIn = await this.checkSession();
+        
+        if (!isLoggedIn) {
+            if (!this.username || !this.password) {
+                throw new Error('PowerSchool session credentials missing. Please configure username and password in VS Code settings.');
+            }
+            
+            await this.getLoginPage();
+            isLoggedIn = await this.submitLogin();
+            
+            if (!isLoggedIn) {
+                throw new Error('PowerSchool login failed. Please check your credentials.');
+            }
+        }
+        
+        return true;
+    }
+
+
+
+
+
+    // Check if access token is valid and not expired
+    isTokenValid() {
+        return this.accessToken && Date.now() < this.tokenExpiry;
+    }
+
+    // Determine which authentication method to use for a given endpoint
+    getAuthMethodForEndpoint(endpoint) {
+        if (this.authMethod === 'session') return 'session';
+        if (this.authMethod === 'oauth') return 'oauth';
+        
+        // Hybrid mode - use session for CPM endpoints and PowerQuery, OAuth for others
+        if (this.authMethod === 'hybrid') {
+            // Use session auth for CPM endpoints and PowerQuery named queries
+            if (endpoint.includes('/ws/cpm/') || endpoint.includes('/ws/schema/query/')) {
+                return 'session';
+            }
+            return 'oauth';
+        }
+        
+        return 'oauth'; // default
+    }
+
+    // Ensure we have appropriate authentication for the endpoint
+    async ensureAuthenticated(endpoint = '') {
+        const method = this.getAuthMethodForEndpoint(endpoint);
+        
+        console.log(`🔐 Authentication decision for endpoint '${endpoint}': using ${method} method`);
+        
+        if (method === 'session') {
+            console.log('🍪 Using session authentication');
+            return await this.ensureSessionAuthenticated();
+        } else {
+            console.log('🔑 Using OAuth authentication');
+            return await this.ensureOAuthAuthenticated();
+        }
+    }
+
+    // Ensure we have a valid OAuth access token
+    async ensureOAuthAuthenticated() {
+        if (!this.isTokenValid()) {
+            if (!this.clientId || !this.clientSecret) {
+                throw new Error('PowerSchool OAuth credentials missing. Please configure client ID and secret in VS Code settings.');
+            }
+            
+            try {
+                await this.requestAccessToken();
+            } catch (error) {
+                console.error('❌ OAuth authentication failed:', error.message);
+                throw new Error(`OAuth authentication failed: ${error.message}. Please verify your client credentials and ensure the PowerSchool plugin is properly configured with OAuth permissions.`);
+            }
+        }
+        
+        return true;
+    }
+
+    // Get appropriate authentication headers for the endpoint
+    getAuthHeadersForEndpoint(endpoint) {
+        const method = this.getAuthMethodForEndpoint(endpoint);
+        
+        if (method === 'session') {
+            return { 'Cookie': this.getCookieHeader() };
+        } else {
+            return { 'Authorization': this.getAuthHeader() };
+        }
+    }
+
+    // Test OAuth connectivity with comprehensive endpoint testing
+    async testOAuthConnection() {
+        console.log('🧪 Starting comprehensive OAuth connection test...');
+        
+        try {
+            await this.ensureAuthenticated();
+            
+            // Test 1: Basic time API (should always work)
+            console.log('📅 Testing basic API access with /ws/v1/time...');
+            const timeResult = await this.testEndpoint('/ws/v1/time', 'Basic API');
+            
+            // Test 2: CPM tree endpoint (with appropriate auth method)
+            console.log('🌳 Testing CPM tree endpoint /ws/cpm/tree...');
+            const cmpResult = await this.testEndpointWithAuth('/ws/cpm/tree?path=/&maxDepth=1', 'CPM Tree');
+            
+            // Test 3: Try alternative CPM paths
+            console.log('🔍 Testing alternative CPM paths...');
+            const altResults = await Promise.allSettled([
+                this.testEndpoint('/ws/cpm/builtintext?path=/admin/home.html', 'CPM BuiltinText'),
+                this.testEndpoint('/ws/cpm/folders', 'CPM Folders'),
+                this.testEndpoint('/admin/customization/home.html', 'CPM Admin Page')
+            ]);
+            
+            // Compile results
+            const results = {
+                basicAPI: timeResult,
+                cpmTree: cmpResult,
+                alternatives: altResults.map(r => r.status === 'fulfilled' ? r.value : r.reason)
+            };
+            
+            console.log('📊 OAuth Test Results:', results);
+            return results;
+            
+        } catch (error) {
+            console.error('❌ OAuth connection test failed:', error);
+            throw error;
+        }
+    }
+
+    // Test a specific endpoint with appropriate authentication
+    async testEndpointWithAuth(path, description) {
+        await this.ensureAuthenticated(path);
+        const authHeaders = this.getAuthHeadersForEndpoint(path);
+        
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: path,
+            method: 'GET',
+            rejectUnauthorized: false,
+            headers: {
+                'Accept': 'application/json',
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                ...authHeaders
+            }
+        };
+
+        return this.executeTestRequest(options, description, path);
+    }
+
+    // Test a specific endpoint and return detailed results (OAuth only)
+    async testEndpoint(path, description) {
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: path,
+            method: 'GET',
+            rejectUnauthorized: false,
+            headers: {
+                'Authorization': this.getAuthHeader(),
+                'Accept': 'application/json',
+                'User-Agent': 'ps-vscode-cpm/2.5.0'
+            }
+        };
+
+        return this.executeTestRequest(options, description, path);
+    }
+
+    // Execute the actual test request
+    async executeTestRequest(options, description, path) {
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => data += chunk);
+                res.on('end', () => {
+                    const result = {
+                        description,
+                        path,
+                        status: res.statusCode,
+                        success: res.statusCode >= 200 && res.statusCode < 300,
+                        headers: res.headers,
+                        dataPreview: data.substring(0, 200),
+                        authMethod: this.getAuthMethodForEndpoint(path)
+                    };
+                    
+                    if (result.success) {
+                        console.log(`✅ ${description}: ${res.statusCode} (${result.authMethod})`);
+                    } else {
+                        console.log(`❌ ${description}: ${res.statusCode} (${result.authMethod}) - ${data.substring(0, 100)}`);
+                    }
+                    
+                    resolve(result);
+                });
+            });
+            req.on('error', (error) => {
+                console.log(`🚫 ${description}: Network Error - ${error.message}`);
+                resolve({
+                    description,
+                    path,
+                    status: 0,
+                    success: false,
+                    error: error.message,
+                    authMethod: this.getAuthMethodForEndpoint(path)
+                });
+            });
+            req.end();
+        });
+    }
+
+    async getFolderTree(path = '/', maxDepth = 1) {
+        const endpoint = `/ws/cpm/tree`;
+        await this.ensureAuthenticated(endpoint);
+        
+        const queryParams = new URLSearchParams({
+            path: path,
+            maxDepth: maxDepth.toString()
+        });
+        
+        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: `${endpoint}?${queryParams.toString()}`,
+            method: 'GET',
+            rejectUnauthorized: false, // Accept self-signed certificates
+            headers: {
+                'Referer': `${this.baseUrl}/admin/customization/home.html`,
+                'Accept': 'application/json',
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                ...authHeaders
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => {
+                    data += chunk;
+                });
+                res.on('end', () => {
+                    try {
+                        if (res.statusCode === 200) {
+                            const response = JSON.parse(data);
+                            resolve(response);
+                        } else if (res.statusCode === 401) {
+                            // Specific handling for authentication errors
+                            const errorMsg = data.includes('Must be logged in') 
+                                ? 'CPM API authentication failed. This likely means:\n1. The PowerSchool plugin is not installed/enabled\n2. Permission mappings are missing\n3. Your admin user lacks access to customization pages\n\nPlease install the powerschool-cmp-plugin.zip file in PowerSchool Admin > Plugin Management Dashboard.'
+                                : `Authentication failed: ${data}`;
+                            reject(new Error(`API Error ${res.statusCode}: ${errorMsg}`));
+                        } else if (res.statusCode === 403) {
+                            // Specific handling for permission errors
+                            const errorMsg = 'Permission denied. This means:\n1. Permission mappings are not properly configured\n2. Your admin user lacks access to required pages\n3. The plugin may not have proper CPM API permissions\n\nEnsure the PowerSchool plugin is installed with permission mappings.';
+                            reject(new Error(`API Error ${res.statusCode}: ${errorMsg}`));
+                        } else {
+                            const response = data.startsWith('{') ? JSON.parse(data) : { message: data };
+                            reject(new Error(`API Error ${res.statusCode}: ${response.message || data}`));
+                        }
+                    } catch (parseError) {
+                        reject(new Error(`API Error ${res.statusCode}: ${data}`));
+                    }
+                });
+            });
+            req.on('error', reject);
+            req.end();
+        });
+    }
+
+    async getPluginFileMappings() {
+        const endpoint = '/ws/schema/query/org.tulsaschools.plugin.file.mappings';
+        await this.ensureAuthenticated(endpoint);
+        
+        console.log('🔌 Fetching plugin file mappings from PowerSchool...');
+        
+        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        
+        // PowerQuery requires a POST body, even if empty
+        // Use pagesize=0 to get all results without pagination
+        const requestBody = JSON.stringify({});
+        
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: endpoint + '?pagesize=0',  // Add pagesize=0 to get all results
+            method: 'POST',
+            rejectUnauthorized: false,
+            headers: {
+                'Referer': `${this.baseUrl}/admin/customization/home.html`,
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(requestBody),
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                ...authHeaders
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let data = '';
+                
+                res.on('data', (chunk) => {
+                    data += chunk;
+                });
+                res.on('end', () => {
+                    try {
+                        if (res.statusCode === 200) {
+                            const response = JSON.parse(data);
+                            resolve(response.record || []);
+                        } else {
+                            console.warn(`⚠️  Plugin file mappings not available: ${res.statusCode}`);
+                            resolve([]); // Return empty array if not available
+                        }
+                    } catch (parseError) {
+                        console.warn(`⚠️  Failed to parse plugin mappings: ${parseError.message}`);
+                        resolve([]); // Return empty array on error
+                    }
+                });
+            });
+            req.on('error', (error) => {
+                console.warn(`⚠️  Plugin file mappings request failed: ${error.message}`);
+                resolve([]); // Return empty array on error
+            });
+            
+            // Send the request body
+            req.write(requestBody);
+            req.end();
+        });
+    }
+
+    async createNewFile(filePath, content) {
+        const endpoint = '/ws/cpm/createAsset';
+        await this.ensureAuthenticated(endpoint);
+        
+        console.log('🆕 CREATING NEW FILE ON POWERSCHOOL:');
+        console.log(`   File path: ${filePath}`);
+        console.log(`   Content length: ${content.length} characters`);
+        
+        const pathParts = filePath.split('/');
+        const fileName = pathParts.pop();
+        const folderPath = pathParts.join('/') || '/';
+        
+        const createData = new URLSearchParams({
+            'newAssetName': fileName,
+            'newAssetPath': folderPath,
+            'newAssetType': 'file',
+            'newAssetRoot': ''
+        }).toString();
+        
+        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        
+        const createOptions = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: endpoint,
+            method: 'POST',
+            rejectUnauthorized: false, // Accept self-signed certificates
+            headers: {
+                'Referer': `${this.baseUrl}/admin/customization/home.html`,
+                'Accept': 'application/json',
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Length': Buffer.byteLength(createData),
+                ...authHeaders
+            }
+        };
+        
+        return new Promise((resolve, reject) => {
+            const req = https.request(createOptions, (res) => {
+                let data = '';
+                res.on('data', (chunk) => {
+                    data += chunk;
+                });
+                res.on('end', () => {
+                    console.log('📤 CREATE FILE API RESPONSE:');
+                    console.log(`   Status: ${res.statusCode}`);
+                    console.log(`   Raw response: ${data}`);
+                    
+                    try {
+                        const response = JSON.parse(data);
+                        if (res.statusCode === 200 && response.returnMessage && response.returnMessage.includes('successfully')) {
+                            console.log('   ✅ File created successfully, now adding content...');
+                            this.updateExistingFileContent(filePath, content).then(resolve).catch(reject);
+                        } else {
+                            reject(new Error(`Failed to create file: ${response.returnMessage || data}`));
+                        }
+                    } catch (parseError) {
+                        reject(new Error(`PowerSchool returned invalid JSON: ${parseError.message}`));
+                    }
+                });
+            });
+            req.on('error', reject);
+            req.write(createData);
+            req.end();
+        });
+    }
+
+    async updateExistingFileContent(filePath, content) {
+        const endpoint = '/ws/cpm/customPageContent';
+        await this.ensureAuthenticated(endpoint);
+        
+        console.log('✏️  UPDATING EXISTING FILE CONTENT:');
+        console.log(`   File path: ${filePath}`);
+        console.log(`   Content length: ${content.length} characters`);
+        
+        // Get file info to get customContentId
+        const fileInfo = await this.downloadFileInfo(filePath);
+        
+        // Generate key path from file path (remove leading slash and replace / with .)
+        const keyPath = filePath.replace(/^\/+/, '').replace(/\//g, '.').replace(/\.(html|htm|js|css|txt)$/i, '');
+        
+        // Generate boundary for multipart data
+        const boundary = `----formdata-node-${Math.random().toString(36).substr(2, 16)}`;
+        
+        // Create multipart form data according to PowerSchool API spec
+        const formFields = {
+            'customContentId': fileInfo.activeCustomContentId || fileInfo.draftCustomContentId || 0,
+            'customContent': content,
+            'customContentPath': filePath,
+            'keyPath': keyPath,
+            'keyValueMap': 'null',
+            'publish': 'true'  // Publish directly
+        };
+        
+        const multipartData = this.generateMultipartData(formFields, boundary);
+        
+        console.log(`   Using boundary: ${boundary}`);
+        console.log(`   Custom content ID: ${formFields.customContentId}`);
+        console.log(`   Key path: ${keyPath}`);
+        
+        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: endpoint,
+            method: 'POST',
+            rejectUnauthorized: false, // Accept self-signed certificates
+            headers: {
+                'Referer': `${this.baseUrl}/admin/customization/home.html`,
+                'Accept': 'application/json',
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                'Content-Length': Buffer.byteLength(multipartData),
+                ...authHeaders
+            }
+        };
+        
+        console.log(`   Request URL: https://${options.hostname}${options.path}`);
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => {
+                    data += chunk;
+                });
+                res.on('end', () => {
+                    console.log('📤 UPDATE FILE API RESPONSE:');
+                    console.log(`   Status: ${res.statusCode}`);
+                    console.log(`   Raw response: ${data}`);
+                    
+                    try {
+                        const response = JSON.parse(data);
+                        console.log(`   Parsed response:`, response);
+                        
+                        if (res.statusCode === 200) {
+                            console.log('   ✅ File content updated successfully');
+                            resolve(response);
+                        } else {
+                            console.log(`   ❌ Update failed with status ${res.statusCode}`);
+                            reject(new Error(`Update failed ${res.statusCode}: ${response.returnMessage || data}`));
+                        }
+                    } catch (parseError) {
+                        console.log(`   ❌ Failed to parse update response: ${parseError.message}`);
+                        reject(new Error(`PowerSchool returned invalid JSON: ${parseError.message}`));
+                    }
+                });
+            });
+            
+            req.on('error', (error) => {
+                console.log(`   ❌ Update request error: ${error.message}`);
+                reject(error);
+            });
+            
+            req.write(multipartData);
+            req.end();
+        });
+    }
+
+    async checkFileExists(filePath) {
+        try {
+            await this.downloadFileInfo(filePath);
+            return true;
+        } catch (error) {
+            console.log(`   ℹ️  File ${filePath} does not exist on PowerSchool: ${error.message}`);
+            return false;
+        }
+    }
+
+    generateMultipartData(fields, boundary) {
+        let data = '';
+        for (const [name, value] of Object.entries(fields)) {
+            data += `--${boundary}\r\n`;
+            data += `Content-Disposition: form-data; name="${name}"\r\n\r\n`;
+            data += `${value}\r\n`;
+        }
+        data += `--${boundary}--\r\n`;
+        return data;
+    }
+
+    async downloadFileInfo(filePath) {
+        const queryParams = new URLSearchParams({
+            LoadFolderInfo: 'false',
+            path: filePath
+        });
+        
+        const endpoint = `/ws/cpm/builtintext`;
+        await this.ensureAuthenticated(endpoint);
+        
+        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: `${endpoint}?${queryParams.toString()}`,
+            method: 'GET',
+            rejectUnauthorized: false, // Accept self-signed certificates
+            headers: {
+                'Referer': `${this.baseUrl}/admin/customization/home.html`,
+                'Accept': 'application/json',
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                ...authHeaders
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => {
+                    data += chunk;
+                });
+                res.on('end', () => {
+                    try {
+                        const response = JSON.parse(data);
+                        if (res.statusCode === 200) {
+                            resolve(response);
+                        } else {
+                            reject(new Error(`Failed to get file info: ${response.message || data}`));
+                        }
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            });
+            req.on('error', reject);
+            req.end();
+        });
+    }
+
+    async verifyUpload(filePath) {
+        console.log('🔍 VERIFYING UPLOAD:');
+        console.log(`   Re-downloading ${filePath} to verify changes...`);
+        
+        try {
+            // Wait a moment for PowerSchool to process the upload
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            const verifyContent = await this.downloadFileContent(filePath);
+            console.log(`   Verification content length: ${verifyContent.length}`);
+            console.log(`   Verification preview: ${verifyContent.substring(0, 200)}${verifyContent.length > 200 ? '...' : ''}`);
+            return verifyContent;
+        } catch (error) {
+            console.log(`   ❌ Verification failed: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async downloadFileContent(filePath) {
+        const queryParams = new URLSearchParams({
+            LoadFolderInfo: 'false',
+            path: filePath
+        });
+        
+        const endpoint = `/ws/cpm/builtintext`;
+        await this.ensureAuthenticated(endpoint);
+        
+        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: `${endpoint}?${queryParams.toString()}`,
+            method: 'GET',
+            rejectUnauthorized: false, // Accept self-signed certificates
+            headers: {
+                'Referer': `${this.baseUrl}/admin/customization/home.html`,
+                'Accept': 'application/json',
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                ...authHeaders
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => {
+                    data += chunk;
+                });
+                res.on('end', () => {
+                    try {
+                        const response = JSON.parse(data);
+                        if (res.statusCode === 200) {
+                            // Return the active custom text or built-in text
+                            const content = response.activeCustomText || response.builtInText || '';
+                            resolve(content);
+                        } else {
+                            reject(new Error(`Failed to download file: ${response.message || data}`));
+                        }
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            });
+            req.on('error', reject);
+            req.end();
+        });
+    }
+
+    async getCompleteDirectoryStructure(rootPath = '/', maxDepth = 3) {
+        console.log('🌲 SCANNING COMPLETE POWERSCHOOL DIRECTORY STRUCTURE');
+        console.log('====================================================');
+        
+        const scannedPaths = new Set();
+        const allFiles = [];
+        const allFolders = [];
+
+        const scanFolder = async (currentPath, depth = 0) => {
+            if (depth > maxDepth || scannedPaths.has(currentPath)) {
+                return;
+            }
+            
+            scannedPaths.add(currentPath);
+            console.log(`${'  '.repeat(depth)}📂 Scanning: ${currentPath} (depth ${depth})`);
+            
+            try {
+                const tree = await this.getFolderTree(currentPath, 1);
+                
+                if (tree.folder) {
+                    const folderInfo = {
+                        path: currentPath,
+                        name: tree.folder.text,
+                        depth: depth
+                    };
+                    allFolders.push(folderInfo);
+                    
+                    // Scan subfolders
+                    if (tree.folder.subFolders && tree.folder.subFolders.length > 0) {
+                        for (const subfolder of tree.folder.subFolders) {
+                            const subfolderPath = currentPath === '/' ? `/${subfolder.text}` : `${currentPath}/${subfolder.text}`;
+                            await scanFolder(subfolderPath, depth + 1);
+                        }
+                    }
+                    
+                    // Collect files
+                    if (tree.folder.pages && tree.folder.pages.length > 0) {
+                        for (const page of tree.folder.pages) {
+                            const filePath = currentPath === '/' ? `/${page.text}` : `${currentPath}/${page.text}`;
+                            const fileInfo = {
+                                path: filePath,
+                                name: page.text,
+                                folderPath: currentPath,
+                                depth: depth
+                            };
+                            allFiles.push(fileInfo);
+                            console.log(`${'  '.repeat(depth + 1)}📄 ${filePath}`);
+                        }
+                    }
+                }
+                
+                // Small delay to avoid overwhelming the server
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+            } catch (error) {
+                console.log(`${'  '.repeat(depth)}❌ Error scanning ${currentPath}: ${error.message}`);
+            }
+        };
+
+        await scanFolder(rootPath, 0);
+        
+        console.log(`\\n📊 SCAN COMPLETE: Found ${allFiles.length} files in ${allFolders.length} folders`);
+        
+        return {
+            files: allFiles.sort((a, b) => a.path.localeCompare(b.path)),
+            folders: allFolders.sort((a, b) => a.path.localeCompare(b.path)),
+            totalFiles: allFiles.length,
+            totalFolders: allFolders.length
+        };
+    }
+
+    async testUploadEndpoint() {
+        await this.ensureAuthenticated();
+        
+        console.log('🔍 TESTING UPLOAD ENDPOINT AVAILABILITY:');
+        
+        // Try different possible upload endpoints
+        const possibleEndpoints = [
+            '/ws/cpm/updatetext',
+            '/ws/cpm/save',
+            '/ws/cpm/upload',
+            '/admin/customization/save.html',
+            '/admin/customization/updatetext.html'
+        ];
+        
+        for (const endpoint of possibleEndpoints) {
+            console.log(`   Testing: ${endpoint}`);
+            
+            const options = {
+                hostname: new URL(this.baseUrl).hostname,
+                port: 443,
+                path: endpoint,
+                method: 'OPTIONS', // Use OPTIONS to test endpoint availability
+                rejectUnauthorized: false, // Accept self-signed certificates
+                headers: {
+                    'Referer': `${this.baseUrl}/admin/customization/home.html`,
+                    'User-Agent': 'ps-vscode-cpm/2.5.0',
+                    'Authorization': this.getAuthHeader()
+                }
+            };
+            
+            try {
+                const result = await new Promise((resolve) => {
+                    const req = https.request(options, (res) => {
+                        console.log(`     Status: ${res.statusCode}`);
+                        resolve({ endpoint, status: res.statusCode, available: res.statusCode !== 404 });
+                    });
+                    req.on('error', () => {
+                        resolve({ endpoint, status: 'error', available: false });
+                    });
+                    req.setTimeout(5000, () => {
+                        req.abort();
+                        resolve({ endpoint, status: 'timeout', available: false });
+                    });
+                    req.end();
+                });
+                
+                if (result.available) {
+                    console.log(`     ✅ ${endpoint} appears to be available`);
+                } else {
+                    console.log(`     ❌ ${endpoint} not available`);
+                }
+            } catch (error) {
+                console.log(`     ❌ ${endpoint} error: ${error.message}`);
+            }
+        }
+    }
+
+    async uploadFileContent(filePath, content) {
+        const endpoint = '/ws/cpm/customPageContent';
+        
+        console.log('🔍 HYBRID AUTH DEBUG:');
+        console.log(`   Auth method setting: ${this.authMethod}`);
+        console.log(`   Endpoint: ${endpoint}`);
+        console.log(`   Selected auth method: ${this.getAuthMethodForEndpoint(endpoint)}`);
+        
+        await this.ensureAuthenticated(endpoint);
+        
+        console.log('🔍 UPLOAD DEBUG INFO (CORRECT PowerSchool API):');
+        console.log(`   File path: ${filePath}`);
+        console.log(`   Content length: ${content.length} characters`);
+        console.log(`   Content preview: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`);
+        
+        // First try to get the file info to get customContentId if it exists
+        let fileInfo = null;
+        try {
+            fileInfo = await this.downloadFileInfo(filePath);
+        } catch (error) {
+            console.log(`   ℹ️  File doesn't exist on PowerSchool yet (new file): ${error.message}`);
+            fileInfo = { activeCustomContentId: 0 }; // New file
+        }
+        
+        // Generate key path from file path (remove leading slash and replace / with .)
+        const keyPath = filePath.replace(/^\/+/, '').replace(/\//g, '.').replace(/\.(html|htm|js|css|txt)$/i, '');
+        
+        // Generate boundary for multipart data
+        const boundary = `----formdata-node-${Math.random().toString(36).substr(2, 16)}`;
+        
+        // Create multipart form data according to PowerSchool API spec
+        const formFields = {
+            'customContentId': fileInfo.activeCustomContentId || 0,
+            'customContent': content,
+            'customContentPath': filePath,
+            'keyPath': keyPath,
+            'keyValueMap': 'null',
+            'publish': 'true'  // Publish directly instead of saving as draft
+        };
+        
+        const multipartData = generateMultipartData(formFields, boundary);
+        
+        console.log(`   Using boundary: ${boundary}`);
+        console.log(`   Custom content ID: ${formFields.customContentId}`);
+        console.log(`   Key path: ${keyPath}`);
+        console.log(`   Multipart data length: ${multipartData.length} bytes`);
+        
+        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: endpoint,
+            method: 'POST',
+            rejectUnauthorized: false, // Accept self-signed certificates
+            headers: {
+                'Referer': `${this.baseUrl}/admin/customization/home.html`,
+                'Accept': 'application/json',
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                'Content-Length': Buffer.byteLength(multipartData),
+                ...authHeaders
+            }
+        };
+        
+        console.log(`   Request URL: https://${options.hostname}${options.path}`);
+        console.log(`   OAuth token: ${this.accessToken ? 'Present' : 'Missing'}`);
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => {
+                    data += chunk;
+                });
+                res.on('end', () => {
+                    console.log('📤 PowerSchool CPM API RESPONSE:');
+                    console.log(`   Status: ${res.statusCode}`);
+                    console.log(`   Headers:`, res.headers);
+                    console.log(`   Raw response: ${data}`);
+                    
+                    try {
+                        const response = JSON.parse(data);
+                        console.log(`   Parsed response:`, response);
+                        
+                        if (res.statusCode === 200) {
+                            console.log('   ✅ PowerSchool upload completed successfully');
+                            if (response.returnMessage && response.returnMessage.includes('successfully')) {
+                                console.log(`   ✅ Success message: ${response.returnMessage}`);
+                                resolve(response);
+                            } else {
+                                console.log(`   ⚠️  Unexpected response: ${response.returnMessage}`);
+                                resolve(response);
+                            }
+                        } else {
+                            console.log(`   ❌ Upload failed with status ${res.statusCode}`);
+                            reject(new Error(`Upload failed ${res.statusCode}: ${response.returnMessage || data}`));
+                        }
+                    } catch (parseError) {
+                        console.log(`   ❌ Failed to parse response JSON: ${parseError.message}`);
+                        console.log(`   Raw data: ${data.substring(0, 500)}${data.length > 500 ? '...' : ''}`);
+                        reject(new Error(`PowerSchool returned invalid JSON response: ${parseError.message}`));
+                    }
+                });
+            });
+            
+            req.on('error', (error) => {
+                console.log(`   ❌ Request error: ${error.message}`);
+                reject(error);
+            });
+            
+            req.write(multipartData);
+            req.end();
+        });
+    }
+}
+
+// Helper function to get the actual root path for PowerSchool plugin files
+// 1. If pluginWebRoot is blank, use workspace root
+// 2. If set, use that directory as plugin root (plugin.xml and web_root are inside)
 function getPluginFilesRoot(workspaceRoot) {
     if (!workspaceRoot) return null;
     const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
     let pluginRootPath = config.get('pluginWebRoot');
-    
-    // If setting is blank or not configured, auto-detect web_root
     if (!pluginRootPath || pluginRootPath.trim() === '') {
-        const webRootPath = path.join(workspaceRoot, 'web_root');
-        if (fs.existsSync(webRootPath) && fs.statSync(webRootPath).isDirectory()) {
-            console.log(`✅ Auto-detected web_root directory: ${webRootPath}`);
-            return webRootPath;
-        }
-        console.log(`📁 No web_root found, using workspace root: ${workspaceRoot}`);
+        console.log(`📁 Using workspace root as plugin root: ${workspaceRoot}`);
         return workspaceRoot;
     }
-    
-    // If setting is configured, use that path
     const fullPluginRoot = path.join(workspaceRoot, pluginRootPath);
     if (fs.existsSync(fullPluginRoot) && fs.statSync(fullPluginRoot).isDirectory()) {
-        console.log(`✅ Found configured plugin root: ${fullPluginRoot}`);
+        console.log(`✅ Found plugin root: ${fullPluginRoot}`);
         return fullPluginRoot;
     }
-    console.warn(`⚠️  Configured plugin root not found: ${fullPluginRoot}`);
+    console.warn(`⚠️  Plugin root not found: ${fullPluginRoot}`);
     console.warn(`⚠️  Falling back to workspace root`);
     return workspaceRoot;
 }
 
+// Helper to get the path to plugin.xml in the plugin root
 function getPluginXmlPath(workspaceRoot) {
     const pluginRoot = getPluginFilesRoot(workspaceRoot);
     return path.join(pluginRoot, 'plugin.xml');
@@ -728,7 +1831,6 @@ function activate(context) {
 
     // Initialize PowerSchool API and Tree Provider
     const api = new PowerSchoolAPI();
-    api.initialize(); // Load configuration from VS Code settings
     const treeProvider = new PowerSchoolTreeProvider(api, pluginFilesRoot);
     
     // Store globally for cleanup
@@ -754,7 +1856,6 @@ function activate(context) {
         if (e.affectsConfiguration('ps-vscode-cpm')) {
             // Clear authentication and reload configuration
             api.clearAuth();
-            api.initialize(); // Reload configuration from VS Code settings
             
             // Check if web_root path changed
             if (e.affectsConfiguration('ps-vscode-cpm.pluginWebRoot')) {
