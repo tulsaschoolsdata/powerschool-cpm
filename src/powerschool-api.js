@@ -16,17 +16,33 @@ function generateMultipartData(fields, boundary) {
 class PowerSchoolAPI {
     constructor() {
         this.baseUrl = '';
-        this.accessToken = '';
-        this.tokenExpiry = null;
+        this.clientId = '';
+        this.clientSecret = '';
+        this.username = '';
+        this.password = '';
         this.authMethod = 'hybrid'; // 'oauth', 'session', or 'hybrid'
+        
+        // OAuth properties
+        this.accessToken = null;
+        this.tokenExpiry = 0;
+        this.tokenType = 'Bearer';
+        
+        // Session properties
+        this.sessionValid = false;
+        this.lastSessionCheck = 0;
+        this.sessionCheckInterval = 5 * 60 * 1000; // 5 minutes
+        this.cookies = new Map();
         this.sessionCookies = '';
-        this.lastSessionCheck = null;
     }
 
     // Initialize from VS Code settings
     initialize() {
         const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
         this.baseUrl = config.get('serverUrl', '').replace(/\/$/, '');
+        this.clientId = config.get('clientId');
+        this.clientSecret = config.get('clientSecret');
+        this.username = config.get('username');
+        this.password = config.get('password');
         this.authMethod = config.get('authMethod', 'hybrid');
         
         if (!this.baseUrl) {
@@ -35,10 +51,14 @@ class PowerSchoolAPI {
     }
 
     clearAuth() {
-        this.accessToken = '';
-        this.tokenExpiry = null;
+        // Clear OAuth state
+        this.accessToken = null;
+        this.tokenExpiry = 0;
+        // Clear session state
+        this.sessionValid = false;
+        this.lastSessionCheck = 0;
+        this.cookies.clear();
         this.sessionCookies = '';
-        this.lastSessionCheck = null;
     }
 
     getAuthMethodForEndpoint(endpoint) {
@@ -56,16 +76,6 @@ class PowerSchoolAPI {
         return 'oauth'; // fallback
     }
 
-    getAuthHeadersForEndpoint(endpoint) {
-        const authMethod = this.getAuthMethodForEndpoint(endpoint);
-        
-        if (authMethod === 'session') {
-            return { 'Cookie': this.sessionCookies };
-        } else {
-            return { 'Authorization': `Bearer ${this.accessToken}` };
-        }
-    }
-
     async ensureAuthenticated(endpoint = '/ws/v1/school') {
         const authMethod = this.getAuthMethodForEndpoint(endpoint);
         
@@ -81,16 +91,12 @@ class PowerSchoolAPI {
             return; // Token is still valid
         }
 
-        const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
-        const clientId = config.get('clientId');
-        const clientSecret = config.get('clientSecret');
-
-        if (!clientId || !clientSecret) {
+        if (!this.clientId || !this.clientSecret) {
             throw new Error('OAuth credentials not configured. Please set ps-vscode-cpm.clientId and ps-vscode-cpm.clientSecret in settings.');
         }
 
         const tokenEndpoint = '/oauth/access_token';
-        const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+        const credentials = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
         
         const postData = 'grant_type=client_credentials';
         
@@ -134,24 +140,57 @@ class PowerSchoolAPI {
         });
     }
 
-    async ensureSessionAuth() {
-        const now = Date.now();
-        if (this.sessionCookies && this.lastSessionCheck && (now - this.lastSessionCheck) < 5 * 60 * 1000) {
-            return; // Session checked within last 5 minutes
+    // Session-based authentication methods
+    parseCookies(cookieHeaders) {
+        if (!cookieHeaders) return;
+        
+        for (const cookie of cookieHeaders) {
+            const [nameValue] = cookie.split(';');
+            const [name, value] = nameValue.split('=');
+            if (name && value) {
+                this.cookies.set(name.trim(), value.trim());
+            }
         }
+    }
 
-        const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
-        const username = config.get('username');
-        const password = config.get('password');
-
-        if (!username || !password) {
-            throw new Error('Session credentials not configured. Please set ps-vscode-cpm.username and ps-vscode-cpm.password in settings.');
+    getCookieHeader() {
+        if (this.cookies.size === 0) return '';
+        
+        const cookieStrings = [];
+        for (const [name, value] of this.cookies) {
+            cookieStrings.push(`${name}=${value}`);
         }
+        return cookieStrings.join('; ');
+    }
 
-        const loginData = new URLSearchParams({
-            'account': username,
-            'pw': password,
-            'translatedMDY': new Date().toLocaleDateString('en-US')
+    async getLoginPage() {
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: '/admin/pw.html',
+            method: 'GET',
+            rejectUnauthorized: false,
+            headers: {
+                'User-Agent': 'ps-vscode-cpm/2.5.0'
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                this.parseCookies(res.headers['set-cookie']);
+                resolve();
+            });
+            req.on('error', reject);
+            req.end();
+        });
+    }
+
+    async submitLogin() {
+        const postData = new URLSearchParams({
+            username: this.username,
+            password: this.password,
+            ldappassword: this.password,
+            request_locale: 'en_US'
         }).toString();
 
         const options = {
@@ -161,28 +200,97 @@ class PowerSchoolAPI {
             method: 'POST',
             rejectUnauthorized: false,
             headers: {
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'Content-Length': Buffer.byteLength(loginData),
-                'User-Agent': 'ps-vscode-cpm/2.5.0'
+                'Content-Length': Buffer.byteLength(postData),
+                'Cookie': this.getCookieHeader(),
+                'Referer': `${this.baseUrl}/admin/pw.html`
             }
         };
 
         return new Promise((resolve, reject) => {
             const req = https.request(options, (res) => {
-                const cookies = res.headers['set-cookie'];
-                if (res.statusCode === 302 && cookies) {
-                    this.sessionCookies = cookies.map(cookie => cookie.split(';')[0]).join('; ');
-                    this.lastSessionCheck = now;
-                    resolve();
+                this.parseCookies(res.headers['set-cookie']);
+                
+                if (res.statusCode === 200 || res.statusCode === 302) {
+                    this.sessionValid = true;
+                    this.lastSessionCheck = Date.now();
+                    resolve(true);
                 } else {
-                    reject(new Error('Session authentication failed'));
+                    resolve(false);
                 }
             });
-
-            req.on('error', error => reject(new Error(`Session login failed: ${error.message}`)));
-            req.write(loginData);
+            req.on('error', reject);
+            req.write(postData);
             req.end();
         });
+    }
+
+    async checkSession() {
+        if (this.sessionValid && (Date.now() - this.lastSessionCheck < this.sessionCheckInterval)) {
+            return true;
+        }
+
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: '/admin/customization/home.html',
+            method: 'GET',
+            rejectUnauthorized: false,
+            headers: {
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                'Cookie': this.getCookieHeader()
+            }
+        };
+
+        return new Promise((resolve) => {
+            const req = https.request(options, (res) => {
+                this.lastSessionCheck = Date.now();
+                this.parseCookies(res.headers['set-cookie']);
+                
+                if (res.statusCode === 200) {
+                    this.sessionValid = true;
+                    resolve(true);
+                } else {
+                    this.sessionValid = false;
+                    resolve(false);
+                }
+            });
+            req.on('error', () => {
+                this.sessionValid = false;
+                resolve(false);
+            });
+            req.end();
+        });
+    }
+
+    async ensureSessionAuth() {
+        let isLoggedIn = await this.checkSession();
+        
+        if (!isLoggedIn) {
+            if (!this.username || !this.password) {
+                throw new Error('PowerSchool session credentials missing. Please configure username and password in VS Code settings.');
+            }
+            
+            await this.getLoginPage();
+            isLoggedIn = await this.submitLogin();
+            
+            if (!isLoggedIn) {
+                throw new Error('PowerSchool login failed. Please check your credentials.');
+            }
+        }
+        
+        return true;
+    }
+
+    getAuthHeadersForEndpoint(endpoint) {
+        const method = this.getAuthMethodForEndpoint(endpoint);
+        
+        if (method === 'session') {
+            return { 'Cookie': this.getCookieHeader() };
+        } else {
+            return { 'Authorization': `${this.tokenType} ${this.accessToken}` };
+        }
     }
 
     async makeRequest(endpoint, method = 'GET', data = null) {
