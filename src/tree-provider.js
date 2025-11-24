@@ -1,6 +1,7 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 class PowerSchoolTreeItem extends vscode.TreeItem {
     constructor(label, collapsibleState, resourceUri, contextValue, remotePath, psApi, localRootPath, isCustom = false, pluginInfo = null, hasPluginInfo = false, hasCustomFiles = false) {
@@ -98,7 +99,7 @@ class PowerSchoolTreeItem extends vscode.TreeItem {
 
     getFolderIcon() {
         const path = require('path');
-        const extensionPath = path.dirname(__filename.replace('/src', ''));
+        const extensionPath = path.dirname(path.dirname(__filename));
         
         // Plugin folders - purple icon
         if (this.isCustom && this.pluginInfo) {
@@ -225,7 +226,7 @@ class PowerSchoolTreeProvider {
             
             if (folderData.folder) {
                 // Create tree items for subfolders and files
-                const treeItems = this.createTreeItems(folderData.folder, folderPath);
+                const treeItems = await this.createTreeItems(folderData.folder, folderPath, null);
                 children.push(...treeItems);
             }
             
@@ -239,84 +240,82 @@ class PowerSchoolTreeProvider {
         }
     }
     
-    createTreeItems(folder, parentPath) {
+    async createTreeItems(folderData, currentPath, parentPluginInfo = null) {
         const items = [];
-        const currentPath = parentPath === '/' ? '' : parentPath;
-        
-        // Create folder items
-        if (folder.subFolders) {
-            for (const subfolder of folder.subFolders) {
-                const folderPath = `${currentPath}/${subfolder.text}`;
-                const localUri = this.localRootPath ? 
-                    vscode.Uri.file(path.join(this.localRootPath, folderPath.replace(/^\/+/g, ''))) : 
-                    vscode.Uri.parse(`powerschool:${folderPath}`);
-                
-                // Check if this folder has any custom files (plugin or not)
-                const hasCustomFiles = this.hasCustomFilesInFolder(folderPath);
-                
-                // Check if this is a plugin folder (folder contains plugin files)
-                let pluginInfo = null;
-                let isCustomFolder = false;
-                
-                // Check if any files in this folder are plugin files
-                if (this.pluginMappings) {
-                    for (const [filePath, plugin] of this.pluginMappings) {
-                        if (filePath.startsWith(folderPath.toLowerCase() + '/')) {
-                            pluginInfo = plugin;
-                            isCustomFolder = true;
-                            break;
-                        }
-                    }
+        let hasCustomFiles = false;
+
+        // Load plugin mappings if not already loaded
+        const pluginMappings = await this.loadPluginMappings();
+        const normalizedCurrentPath = currentPath.toLowerCase();
+
+        // Sort subfolders alphabetically and add to items
+        if (folderData.subFolders) {
+            const sortedSubfolders = [...folderData.subFolders].sort((a, b) =>
+                a.text.toLowerCase().localeCompare(b.text.toLowerCase())
+            );
+
+            for (const subfolder of sortedSubfolders) {
+                const folderPath = currentPath === '/' ? `/${subfolder.text}` : `${currentPath}/${subfolder.text}`;
+                const normalizedPath = folderPath.toLowerCase();
+                // Only use plugin info for CUSTOM items
+                let effectivePluginInfo = null;
+                if (subfolder.custom) {
+                    const directPluginInfo = pluginMappings.get(normalizedPath) || null;
+                    effectivePluginInfo = directPluginInfo || parentPluginInfo;
                 }
-                
-                const folderItem = new PowerSchoolTreeItem(
+                // Recursively get subfolder items and check if any are custom
+                const subfolderTree = await this.createTreeItems(subfolder, folderPath, effectivePluginInfo);
+                const subfolderHasCustom = subfolderTree.some(child => child.isCustom || child.hasCustomFiles);
+                if (subfolderHasCustom) hasCustomFiles = true;
+                const folderUri = vscode.Uri.file(path.join(this.localRootPath, folderPath.replace(/^\/+/g, '')));
+                const item = new PowerSchoolTreeItem(
                     subfolder.text,
                     vscode.TreeItemCollapsibleState.Collapsed,
-                    localUri,
+                    folderUri,
                     'folder',
                     folderPath,
                     this.psApi,
                     this.localRootPath,
-                    isCustomFolder,
-                    pluginInfo,
-                    !!pluginInfo,
-                    hasCustomFiles
+                    subfolder.custom,
+                    effectivePluginInfo,
+                    effectivePluginInfo !== null,
+                    subfolderHasCustom
                 );
-                
-                items.push(folderItem);
+                items.push(item);
             }
         }
-        
-        // Create file items
-        if (folder.pages) {
-            for (const page of folder.pages) {
-                const filePath = `${currentPath}/${page.text}`;
-                const localUri = this.localRootPath ? 
-                    vscode.Uri.file(path.join(this.localRootPath, filePath.replace(/^\/+/g, ''))) : 
-                    vscode.Uri.parse(`powerschool:${filePath}`);
-                
-                // Check if this file has plugin info
-                const pluginInfo = this.getPluginInfoForPath(filePath);
-                const isCustomFile = !!pluginInfo || this.isCustomFile(filePath);
-                
-                const fileItem = new PowerSchoolTreeItem(
+
+        // Sort pages alphabetically and add to items
+        if (folderData.pages) {
+            const sortedPages = [...folderData.pages].sort((a, b) =>
+                a.text.toLowerCase().localeCompare(b.text.toLowerCase())
+            );
+
+            for (const page of sortedPages) {
+                const filePath = currentPath === '/' ? `/${page.text}` : `${currentPath}/${page.text}`;
+                const normalizedPath = filePath.toLowerCase();
+                let effectivePluginInfo = null;
+                if (page.custom) {
+                    const directPluginInfo = pluginMappings.get(normalizedPath) || null;
+                    effectivePluginInfo = directPluginInfo || parentPluginInfo;
+                    hasCustomFiles = true;
+                }
+                const item = new PowerSchoolTreeItem(
                     page.text,
                     vscode.TreeItemCollapsibleState.None,
-                    localUri,
+                    null,
                     'file',
                     filePath,
                     this.psApi,
                     this.localRootPath,
-                    isCustomFile,
-                    pluginInfo,
-                    !!pluginInfo,
-                    false // files don't have hasCustomFiles
+                    page.custom,
+                    effectivePluginInfo,
+                    effectivePluginInfo !== null
                 );
-                
-                items.push(fileItem);
+                items.push(item);
             }
         }
-        
+
         return items;
     }
     
@@ -342,41 +341,98 @@ class PowerSchoolTreeProvider {
     }
     
     async downloadFile(treeItem) {
-        if (!treeItem || treeItem.contextValue !== 'file') {
-            vscode.window.showErrorMessage('Invalid file selected.');
-            return;
-        }
-        
         try {
-            vscode.window.showInformationMessage(`Downloading ${treeItem.label}...`);
-            
-            const content = await this.psApi.downloadFileContent(treeItem.remotePath);
-            
-            if (!this.localRootPath) {
-                vscode.window.showErrorMessage('No workspace folder is open. Please open a folder first.');
-                return;
-            }
-            
+            // Create local path that mirrors PowerSchool structure within the plugin files root
+            // this.localRootPath already points to web_root if it exists, or workspace root otherwise
             const localFilePath = path.join(this.localRootPath, treeItem.remotePath.replace(/^\/+/g, ''));
-            const localDir = path.dirname(localFilePath);
             
-            // Create directory if it doesn't exist
+            console.log(`📥 Downloading: ${treeItem.remotePath}`);
+            console.log(`   Plugin files root: ${this.localRootPath}`);
+            console.log(`   Target file path: ${localFilePath}`);
+            
+            const localDir = path.dirname(localFilePath);
             if (!fs.existsSync(localDir)) {
                 fs.mkdirSync(localDir, { recursive: true });
+                console.log(`📁 Created directory: ${localDir}`);
+            } else {
+                console.log(`📁 Directory exists: ${localDir}`);
             }
             
-            // Write file content
-            fs.writeFileSync(localFilePath, content, 'utf8');
+            vscode.window.showInformationMessage(`Downloading ${treeItem.label}...`);
             
-            // Open the file in editor
+            const fileContent = await this.downloadFileContent(treeItem.remotePath);
+            
+            // Check if file already exists
+            const fileExists = fs.existsSync(localFilePath);
+            console.log(`   File ${fileExists ? 'EXISTS' : 'NEW'}: ${localFilePath}`);
+            
+            fs.writeFileSync(localFilePath, fileContent);
+            
+            console.log(`✅ Downloaded: ${treeItem.remotePath}`);
+            const relativeLocalPath = path.relative(this.localRootPath, localFilePath);
+            vscode.window.showInformationMessage(
+                `${fileExists ? 'Updated' : 'Downloaded'} ${treeItem.label} to ${relativeLocalPath}`
+            );
+            
+            this._onDidChangeTreeData.fire(treeItem);
+            
             const document = await vscode.workspace.openTextDocument(localFilePath);
             await vscode.window.showTextDocument(document);
             
-            vscode.window.showInformationMessage(`Downloaded ${treeItem.label} to ${path.relative(this.localRootPath, localFilePath)}`);
-            
+            return { success: true };
         } catch (error) {
+            console.error(`❌ Failed to download ${treeItem.remotePath}:`, error);
             vscode.window.showErrorMessage(`Failed to download ${treeItem.label}: ${error.message}`);
+            return { success: false, message: error.message };
         }
+    }
+
+    async downloadFileContent(filePath) {
+        const queryParams = new URLSearchParams({
+            LoadFolderInfo: 'false',
+            path: filePath
+        });
+        
+        const endpoint = '/ws/cpm/builtintext';
+        await this.psApi.ensureAuthenticated(endpoint);
+        
+        const options = {
+            hostname: new URL(this.psApi.baseUrl).hostname,
+            port: 443,
+            path: `${endpoint}?${queryParams.toString()}`,
+            method: 'GET',
+            rejectUnauthorized: false, // Accept self-signed certificates
+            headers: {
+                'Referer': `${this.psApi.baseUrl}/admin/customization/home.html`,
+                'Accept': 'application/json',
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                'Cookie': this.psApi.getCookieHeader()
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => {
+                    data += chunk;
+                });
+                res.on('end', () => {
+                    try {
+                        const response = JSON.parse(data);
+                        if (res.statusCode === 200) {
+                            const content = response.activeCustomText || response.builtInText || '';
+                            resolve(content);
+                        } else {
+                            reject(new Error(`Failed to download file: ${response.message || data}`));
+                        }
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            });
+            req.on('error', reject);
+            req.end();
+        });
     }
     
     async publishFile(treeItem) {
