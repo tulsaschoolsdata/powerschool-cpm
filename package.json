@@ -2,7 +2,7 @@
   "name": "ps-vscode-cpm",
   "displayName": "ps-vscode-cpm",
   "description": "Manage custom pages in PowerSchool",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "publisher": "zuvy",
   "engines": {
     "vscode": "^1.104.0"
@@ -149,6 +149,22 @@
         {
           "id": "ps-vscode-cpm-explorer",
           "name": "PowerSchool Files"
+        },
+        {
+          "id": "ps-vscode-cpm-commands",
+          "name": "Commands"
+        },
+        {
+          "id": "ps-vscode-cpm-server-info",
+          "name": "Server Info"
+        },
+        {
+          "id": "ps-vscode-cpm-templates",
+          "name": "Templates"
+        },
+        {
+          "id": "ps-vscode-cpm-snippets",
+          "name": "Snippets"
         }
       ]
     },
@@ -161,25 +177,10 @@
         }
       ]
     },
-    "submenus": [
-      {
-        "id": "ps-vscode-cpm.snippets",
-        "label": "Insert PowerSchool Snippet"
-      },
-      {
-        "id": "ps-vscode-cpm.templates",
-        "label": "Create New PowerSchool File"
-      }
-    ],
     "menus": {
       "view/title": [
         {
           "command": "ps-vscode-cpm.refresh",
-          "when": "view == ps-vscode-cpm-explorer",
-          "group": "navigation"
-        },
-        {
-          "command": "ps-vscode-cpm.createNewFile",
           "when": "view == ps-vscode-cpm-explorer",
           "group": "navigation"
         },
@@ -194,125 +195,6 @@
           "command": "ps-vscode-cpm.publishFile",
           "when": "view == ps-vscode-cpm-explorer && (viewItem == file || viewItem == file-custom || viewItem == file-custom-plugin)",
           "group": "inline"
-        }
-      ],
-      "commandPalette": [
-        {
-          "command": "ps-vscode-cpm.publishCurrentFile",
-          "when": "editorIsOpen"
-        },
-        {
-          "command": "ps-vscode-cpm.createNewFile"
-        },
-        {
-          "command": "ps-vscode-cpm.publishNewFile",
-          "when": "editorIsOpen"
-        },
-        {
-          "command": "ps-vscode-cpm.showCurrentFilePath",
-          "when": "editorIsOpen"
-        },
-        {
-          "command": "ps-vscode-cpm.insertSnippet"
-        }
-      ],
-      "editor/context": [
-        {
-          "command": "ps-vscode-cpm.publishCurrentFile",
-          "when": "resourceExtname =~ /\\.(html|htm|js|css|txt)$/",
-          "group": "powerschool"
-        },
-        {
-          "command": "ps-vscode-cpm.publishNewFile",
-          "when": "resourceExtname =~ /\\.(html|htm|js|css|txt)$/",
-          "group": "powerschool"
-        },
-        {
-          "command": "ps-vscode-cpm.showCurrentFilePath",
-          "when": "resourceExtname =~ /\\.(html|htm|js|css|txt)$/",
-          "group": "powerschool"
-        },
-        {
-          "submenu": "ps-vscode-cpm.snippets",
-          "when": "resourceExtname =~ /\\.(html|htm|js|css|txt)$/",
-          "group": "powerschool@1"
-        },
-        {
-          "submenu": "ps-vscode-cpm.templates",
-          "when": "resourceExtname =~ /\\.(html|htm|js|css|txt)$/",
-          "group": "powerschool@2"
-        }
-      ],
-      "ps-vscode-cpm.snippets": [
-        {
-          "command": "ps-vscode-cpm.insertSnippet.box_round",
-          "group": "layout"
-        },
-        {
-          "command": "ps-vscode-cpm.insertSnippet.table",
-          "group": "layout"
-        },
-        {
-          "command": "ps-vscode-cpm.insertSnippet.calendar",
-          "group": "forms"
-        },
-        {
-          "command": "ps-vscode-cpm.insertSnippet.form",
-          "group": "forms"
-        },
-        {
-          "command": "ps-vscode-cpm.insertSnippet.dialog",
-          "group": "ui"
-        },
-        {
-          "command": "ps-vscode-cpm.insertSnippet.dynamic_tabs",
-          "group": "ui"
-        },
-        {
-          "command": "ps-vscode-cpm.insertSnippet.collapsible_box",
-          "group": "ui"
-        },
-        {
-          "command": "ps-vscode-cpm.insertSnippet.jquery_function",
-          "group": "javascript"
-        },
-        {
-          "command": "ps-vscode-cpm.insertSnippet.tlist_sql",
-          "group": "powerschool"
-        },
-        {
-          "command": "ps-vscode-cpm.insertSnippet.if_block",
-          "group": "powerschool"
-        },
-        {
-          "command": "ps-vscode-cpm.insertSnippet.student_info",
-          "group": "powerschool"
-        },
-        {
-          "command": "ps-vscode-cpm.insertSnippet.breadcrumb",
-          "group": "navigation"
-        }
-      ],
-      "ps-vscode-cpm.templates": [
-        {
-          "command": "ps-vscode-cpm.createTemplate.admin",
-          "group": "admin"
-        },
-        {
-          "command": "ps-vscode-cpm.createTemplate.adminStudentPage",
-          "group": "admin"
-        },
-        {
-          "command": "ps-vscode-cpm.createTemplate.teacher",
-          "group": "teacher"
-        },
-        {
-          "command": "ps-vscode-cpm.createTemplate.teacherBackpack",
-          "group": "teacher"
-        },
-        {
-          "command": "ps-vscode-cpm.createTemplate.parentPortal",
-          "group": "parent"
         }
       ]
     },
