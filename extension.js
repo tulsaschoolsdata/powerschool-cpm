@@ -8,6 +8,12 @@ const {
     registerSnippetCommands,
     getPluginFilesRoot 
 } = require('./src/commands');
+const {
+    ServerInfoProvider,
+    CommandsProvider,
+    TemplatesProvider,
+    SnippetsProvider
+} = require('./src/panel-providers');
 
 function activate(context) {
     // Get workspace folder - use the first workspace folder as root
@@ -108,6 +114,19 @@ function activate(context) {
             });
     });
 
+    // Initialize panel providers
+    const serverInfoProvider = new ServerInfoProvider();
+    const commandsProvider = new CommandsProvider();
+    const templatesProvider = new TemplatesProvider();
+    const snippetsProvider = new SnippetsProvider();
+    
+    // Watch for configuration changes to refresh server info panel
+    const serverInfoConfigWatcher = vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('ps-vscode-cpm')) {
+            serverInfoProvider.refresh();
+        }
+    });
+    
     // Check if tree view already exists and dispose it
     if (global.powerschoolCpmTreeView) {
         try {
@@ -120,6 +139,11 @@ function activate(context) {
     
     // Register the tree view with error handling
     let treeView;
+    let serverInfoView;
+    let commandsView;
+    let templatesView;
+    let snippetsView;
+    
     try {
         treeView = vscode.window.createTreeView('ps-vscode-cpm-explorer', {
             treeDataProvider: treeProvider,
@@ -128,6 +152,23 @@ function activate(context) {
         
         // Store globally for cleanup
         global.powerschoolCpmTreeView = treeView;
+        
+        // Register panel tree views
+        serverInfoView = vscode.window.createTreeView('ps-vscode-cpm-server-info', {
+            treeDataProvider: serverInfoProvider
+        });
+        
+        commandsView = vscode.window.createTreeView('ps-vscode-cpm-commands', {
+            treeDataProvider: commandsProvider
+        });
+        
+        templatesView = vscode.window.createTreeView('ps-vscode-cpm-templates', {
+            treeDataProvider: templatesProvider
+        });
+        
+        snippetsView = vscode.window.createTreeView('ps-vscode-cpm-snippets', {
+            treeDataProvider: snippetsProvider
+        });
         
         // Register file decoration provider to color file/folder labels
         const fileDecorator = vscode.window.registerFileDecorationProvider({
@@ -212,9 +253,14 @@ function activate(context) {
     
     // Add all command disposables to context subscriptions
     context.subscriptions.push(
-        treeView, 
+        treeView,
+        serverInfoView,
+        commandsView,
+        templatesView,
+        snippetsView,
         workspaceWatcher, 
         configWatcher,
+        serverInfoConfigWatcher,
         fileSaveWatcher,
         ...basicCommands,
         ...fileCommands,
