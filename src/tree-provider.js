@@ -389,7 +389,7 @@ class PowerSchoolTreeProvider {
 
     async downloadFileContent(filePath) {
         const queryParams = new URLSearchParams({
-            LoadFolderInfo: 'false',
+            LoadFolderInfo: 'false', // Keep downloads fast - cache will be populated by file save watcher
             path: filePath
         });
         
@@ -420,6 +420,8 @@ class PowerSchoolTreeProvider {
                     try {
                         const response = JSON.parse(data);
                         if (res.statusCode === 200) {
+                            // Note: With LoadFolderInfo='false', we don't get customContentId here
+                            // The file save watcher will cache it after the file is saved locally
                             const content = response.activeCustomText || response.builtInText || '';
                             resolve(content);
                         } else {
@@ -436,10 +438,15 @@ class PowerSchoolTreeProvider {
     }
     
     async publishFile(treeItem) {
+        console.log('📤 publishFile called with treeItem:', treeItem ? treeItem.label : 'null');
+        
         if (!treeItem || treeItem.contextValue !== 'file') {
+            console.log('❌ Invalid file selected - contextValue:', treeItem ? treeItem.contextValue : 'null');
             vscode.window.showErrorMessage('Invalid file selected.');
             return;
         }
+        
+        console.log('📤 Publishing file:', treeItem.label, 'remotePath:', treeItem.remotePath);
         
         try {
             if (!this.localRootPath) {
@@ -458,22 +465,11 @@ class PowerSchoolTreeProvider {
             
             vscode.window.showInformationMessage(`Publishing ${treeItem.label} to PowerSchool...`);
             
-            const fileExists = await this.psApi.checkFileExists(treeItem.remotePath);
+            // Upload file (this method handles both create and update internally)
+            const result = await this.psApi.uploadFileContent(treeItem.remotePath, content);
             
-            if (fileExists) {
-                await this.psApi.updateExistingFileContent(treeItem.remotePath, content);
-            } else {
-                await this.psApi.createNewFile(treeItem.remotePath, content);
-            }
-            
-            // Verify the upload
-            const verifiedContent = await this.psApi.verifyUpload(treeItem.remotePath);
-            
-            if (content === verifiedContent) {
-                vscode.window.showInformationMessage(`Published ${treeItem.label} successfully!`);
-            } else {
-                vscode.window.showWarningMessage(`Published ${treeItem.label} but content verification failed.`);
-            }
+            console.log('✅ Upload complete, result:', result);
+            vscode.window.showInformationMessage(`✅ Published ${treeItem.label} successfully!`);
             
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to publish ${treeItem.label}: ${error.message}`);
@@ -481,26 +477,39 @@ class PowerSchoolTreeProvider {
     }
     
     async publishCurrentFile() {
+        console.log('📤 publishCurrentFile called');
+        
         const activeEditor = vscode.window.activeTextEditor;
         if (!activeEditor) {
+            console.log('❌ No active editor');
             vscode.window.showWarningMessage('No active file to publish.');
             return;
         }
         
+        console.log('📤 Active editor fileName:', activeEditor.document.fileName);
+        
         if (!this.localRootPath) {
+            console.log('❌ No localRootPath set on tree provider');
             vscode.window.showErrorMessage('No workspace folder is open.');
             return;
         }
         
+        console.log('📤 localRootPath:', this.localRootPath);
+        
         const filePath = activeEditor.document.fileName;
         const relativePath = path.relative(this.localRootPath, filePath);
         
+        console.log('📤 relativePath:', relativePath);
+        
         if (!relativePath || relativePath.startsWith('..')) {
+            console.log('❌ File is outside workspace - relativePath:', relativePath);
             vscode.window.showWarningMessage('File is not in the current workspace.');
             return;
         }
         
         const remotePath = '/' + relativePath.replace(/\\/g, '/');
+        
+        console.log('📤 remotePath for PowerSchool:', remotePath);
         
         // Create a temporary tree item for publishing
         const treeItem = new PowerSchoolTreeItem(
@@ -512,6 +521,8 @@ class PowerSchoolTreeProvider {
             this.psApi,
             this.localRootPath
         );
+        
+        console.log('📤 Created treeItem, calling publishFile...');
         
         await this.publishFile(treeItem);
     }
