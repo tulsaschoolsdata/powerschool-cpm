@@ -44,4 +44,4 @@ Thumbs.db
 # zip files
 *.zip
 
-!*.vsix
+*.vsix
