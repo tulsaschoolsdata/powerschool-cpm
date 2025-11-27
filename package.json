@@ -2,7 +2,7 @@
   "name": "ps-vscode-cpm",
   "displayName": "ps-vscode-cpm",
   "description": "Manage custom pages in PowerSchool",
-  "version": "2.7.3",
+  "version": "2.8.0",
   "publisher": "zuvy",
   "engines": {
     "vscode": "^1.104.0"

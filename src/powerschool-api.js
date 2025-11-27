@@ -33,6 +33,35 @@ class PowerSchoolAPI {
         this.sessionCheckInterval = 5 * 60 * 1000; // 5 minutes
         this.cookies = new Map();
         this.sessionCookies = '';
+        
+        // Cache for customContentId (in-memory + persistent storage)
+        // Map: filePath -> customContentId
+        this.contentIdCache = new Map();
+        this.workspaceState = null; // Set by extension on init
+    }
+    
+    // Set workspace state storage (called by extension.js)
+    setWorkspaceState(state) {
+        this.workspaceState = state;
+        this.loadCacheFromStorage();
+    }
+    
+    // Load cache from persistent storage
+    loadCacheFromStorage() {
+        if (!this.workspaceState) return;
+        
+        const stored = this.workspaceState.get('ps-cpm-contentIdCache', {});
+        this.contentIdCache = new Map(Object.entries(stored));
+        console.log('💾 Loaded', this.contentIdCache.size, 'cached customContentIds from storage');
+    }
+    
+    // Save cache to persistent storage
+    saveCacheToStorage() {
+        if (!this.workspaceState) return;
+        
+        const obj = Object.fromEntries(this.contentIdCache);
+        this.workspaceState.update('ps-cpm-contentIdCache', obj);
+        console.log('💾 Saved', this.contentIdCache.size, 'customContentIds to storage');
     }
 
     // Initialize from VS Code settings
@@ -59,6 +88,8 @@ class PowerSchoolAPI {
         this.lastSessionCheck = 0;
         this.cookies.clear();
         this.sessionCookies = '';
+        // DON'T clear content ID cache - it persists across auth changes
+        // this.contentIdCache.clear();
     }
 
     getAuthMethodForEndpoint(endpoint) {
@@ -451,16 +482,61 @@ class PowerSchoolAPI {
     }
 
     async uploadFileContent(filePath, content) {
+        console.log('📤 uploadFileContent called - filePath:', filePath, 'content length:', content.length);
         const endpoint = '/ws/cpm/customPageContent';
+        console.log('🔍 Calling ensureAuthenticated for endpoint:', endpoint);
         await this.ensureAuthenticated(endpoint);
+        console.log('✅ Authentication successful');
         
-        // Try to get existing file info
-        let fileInfo = null;
-        try {
-            fileInfo = await this.downloadFileInfo(filePath);
-        } catch (error) {
-            // File doesn't exist, that's ok
+        // FIRST: Check cache for existing customContentId (fastest path)
+        const cachedId = this.contentIdCache.get(filePath);
+        if (cachedId) {
+            console.log('💾 Using cached customContentId:', cachedId, '(fast path)');
+            try {
+                const result = await this._doUpload(filePath, content, cachedId);
+                console.log('✅ Upload succeeded with cached ID');
+                return result;
+            } catch (error) {
+                // Cache is stale - clear it and continue to fetch fresh ID
+                console.log('⚠️ Cached ID failed, clearing cache and fetching fresh ID');
+                this.contentIdCache.delete(filePath);
+                // Fall through to fetch actual ID
+            }
         }
+        
+        // SECOND: No cache, try to fetch actual customContentId from PowerSchool
+        // This handles existing files that weren't cached yet
+        console.log('🔍 No cached ID, checking if file exists on PowerSchool...');
+        try {
+            const fileInfo = await this.downloadFileInfo(filePath);
+            const customContentId = fileInfo?.activeCustomContentId;
+            
+            if (customContentId) {
+                console.log('📤 File exists with customContentId:', customContentId);
+                this.contentIdCache.set(filePath, customContentId);
+                this.saveCacheToStorage(); // Persist to storage
+                console.log('💾 Cached customContentId for future uploads');
+                return await this._doUpload(filePath, content, customContentId);
+            }
+        } catch (error) {
+            // File doesn't exist on PowerSchool - it's a new file
+            console.log('ℹ️ File not found on PowerSchool, treating as new file');
+        }
+        
+        // THIRD: File is new, use customContentId: 0
+        console.log('📤 Uploading as new file with customContentId: 0');
+        try {
+            const result = await this._doUpload(filePath, content, 0);
+            console.log('✅ Upload succeeded (new file created)');
+            return result;
+        } catch (error) {
+            console.log('❌ Upload failed:', error.message);
+            throw error;
+        }
+    }
+    
+    async _doUpload(filePath, content, customContentId) {
+        const endpoint = '/ws/cpm/customPageContent';
         
         // Generate key path from file path
         const keyPath = filePath.replace(/^\/+/, '').replace(/\//g, '.').replace(/\.(html|htm|js|css|txt)$/i, '');
@@ -470,7 +546,7 @@ class PowerSchoolAPI {
         
         // Create multipart form data
         const formFields = {
-            'customContentId': fileInfo?.activeCustomContentId || 0,
+            'customContentId': customContentId,  // Use provided ID (0 for new, actual ID for updates)
             'customContent': content,
             'customContentPath': filePath,
             'keyPath': keyPath,
@@ -503,19 +579,34 @@ class PowerSchoolAPI {
                 res.on('data', chunk => data += chunk);
                 res.on('end', () => {
                     if (res.statusCode >= 200 && res.statusCode < 300) {
+                        console.log('✅ Upload successful - HTTP', res.statusCode);
                         try {
                             const result = JSON.parse(data);
-                            resolve(result);
+                            
+                            // PowerSchool returns HTTP 200 even on errors - check the message
+                            if (result.returnMessage && result.returnMessage.includes('system error')) {
+                                console.log('❌ PowerSchool error:', result.returnMessage);
+                                reject(new Error(result.returnMessage));
+                            } else if (result.returnMessage && result.returnMessage.includes('could not be saved')) {
+                                console.log('❌ PowerSchool error:', result.returnMessage);
+                                reject(new Error(result.returnMessage));
+                            } else {
+                                resolve(result);
+                            }
                         } catch (error) {
                             resolve({ success: true, raw: data });
                         }
                     } else {
+                        console.log('❌ Upload failed - HTTP', res.statusCode);
                         reject(new Error(`Upload failed: HTTP ${res.statusCode}`));
                     }
                 });
             });
             
-            req.on('error', error => reject(error));
+            req.on('error', error => {
+                console.log('❌ Upload error:', error.message);
+                reject(error);
+            });
             req.write(multipartData);
             req.end();
         });
@@ -553,7 +644,14 @@ class PowerSchoolAPI {
                 res.on('end', () => {
                     if (res.statusCode === 200) {
                         try {
-                            resolve(JSON.parse(data));
+                            const fileInfo = JSON.parse(data);
+                            // Cache the customContentId for future uploads
+                            if (fileInfo.activeCustomContentId) {
+                                this.contentIdCache.set(filePath, fileInfo.activeCustomContentId);
+                                this.saveCacheToStorage(); // Persist to storage
+                                console.log('💾 Cached customContentId from downloadFileInfo:', fileInfo.activeCustomContentId);
+                            }
+                            resolve(fileInfo);
                         } catch (error) {
                             reject(new Error('Failed to parse file info response'));
                         }
