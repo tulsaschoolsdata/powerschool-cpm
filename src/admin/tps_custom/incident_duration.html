@@ -1,0 +1,183 @@
+<script src="/tps_custom/init.js"></script>
+<script type="text/javascript">
+  ;(function ($, tps_custom) {
+
+    $(function () {
+      var $submit_button = $('#add-action');
+      var $update_button = $('#update-action');
+      var $edit_action_btn = $("[id^=act_li3]");
+      var $new_action_btn = $('#yui-gen1');
+      var $validate_action_button = $('#validate_action_button');
+      var $cancel_action_button = $('#cancel_action_button');
+      var $begin_date = $('#actionBeginDate');
+      var $end_date = $('#actionEndDate');
+      var $actual_duration = $('#actionActualDuration');
+      var $action_duration = $('#actionDuration');
+      var $action_taken_detail = $('#actionResoDesc');
+      var $action_resolution = $('#actionResoDate');
+      var $in_session_error = $('#date-not-in-session');
+      var $date_order_error = $('#dates-out-of-order');
+      var $action_taken_detail_error = $('#action-taken-detail-blank');
+      var $begin_date_error_insertion = $begin_date.closest('div');
+      var $end_date_error_insertion = $end_date.closest('div');
+      var $action_taken_detail_error_insertion = $action_taken_detail.closest('div');
+      var dates_array = []
+
+      $new_action_btn.on('click', function () {
+        if (!$begin_date.val() || !$end_date.val()) {
+          $submit_button.addClass('disabled');
+        }
+      });
+
+      $edit_action_btn.on('click', function () {
+        if ($begin_date.val() && $end_date.val()) {
+          $update_button.removeClass('disabled');}
+      });
+
+      $action_taken_detail.attr('placeholder', 'Use Validate button to enable Add Action button.');
+
+      function validator() {
+        var errors = [];
+        if ($begin_date.length !== 1) errors.push('Should be exactly one $begin_date');
+        if ($end_date.length !== 1) errors.push('Should be exactly one $end_date');
+        if ($actual_duration.length !== 1) errors.push('Should be exactly one $actual_duration');
+        return errors;
+      }
+
+      ~[tlist_sql;
+        WITH term_data AS (
+        SELECT DISTINCT Terms.FirstDay
+            , Terms.LastDay
+        FROM Terms
+        WHERE (REGEXP_LIKE(Terms.Name, CHR(94) || CHR(91) || '0-9' || CHR(93) || CHR(123) || '4' || CHR(125) || '-' || CHR(91) || '0-9' || CHR(93) || CHR(123) || '4' || CHR(125) || '$'))
+        AND Terms.YearID = ~(yearid)
+        AND terms.SchoolID = 0
+        AND terms.IsYearRec = 1
+        ),
+        inc_studs AS (
+            SELECT s.SchoolID
+                , LISTAGG(s.Student_Number, ', ') WITHIN GROUP (ORDER BY s.Student_Number) as student_list
+            FROM Incident_Person_Role ipr
+            JOIN Students s ON s.ID = ipr.StudentID
+            WHERE ipr.Incident_ID = ~[gpv:id]
+            GROUP BY s.SchoolID
+        )
+        SELECT cd.Date_Value
+        FROM inc_studs
+        JOIN Calendar_Day cd ON cd.SchoolID = inc_studs.SchoolID
+        WHERE cd.InSession = 1
+        AND cd.Date_Value BETWEEN (SELECT term_data.FirstDay FROM term_data) and (SELECT term_data.LastDay from term_data)
+        ORDER BY cd.Date_Value
+
+        ;]
+          var calendar_day = new Date("~(Date_Value)")
+          calendar_day = ("0" + (calendar_day.getMonth() + 1)).slice(-2) + "/" + ("0" + calendar_day.getDate()).slice(-2) + "/" + calendar_day.getFullYear();
+          dates_array.push(calendar_day);
+      [/tlist_sql]
+
+      if (tps_custom.load(validator, 'Loading duration calculation.')) {
+        $submit_button.addClass('disabled');
+        $update_button.addClass('disabled');
+        $action_duration.attr('readonly', true);
+
+        if ($cancel_action_button.length > 0) {
+            $validate_action_button.insertAfter($cancel_action_button);
+        } else {
+            $validate_action_button.prependTo($('dialog-footer dialog-footer-button'));
+        }
+
+        // Ensure the button is visible
+        $validate_action_button.show();
+
+        let validate_action_button = $('#validate-action-button');
+
+        validate_action_button.on('click', function (event) {
+            let begin_date = $begin_date.val();
+            let end_date = $end_date.val();
+
+           // Ensure valid 'begin date'.
+            let begin_index = $.inArray(begin_date, dates_array);
+            if (begin_index < 0) {
+                $begin_date_error_insertion.append($in_session_error);
+                $in_session_error.css('display', 'block');
+                $begin_date.val('');
+                return;
+            } else if (begin_index > 0 && $in_session_error) {
+                $in_session_error.remove();
+            }
+
+            // Ensure valid 'end date'.
+            let end_index = $.inArray(end_date, dates_array);
+            if (end_index < 0) {
+                $end_date_error_insertion.append($in_session_error);
+                $in_session_error.css('display', 'block');
+                $end_date.val('');
+                return;
+            } else if (end_index > 0 && $in_session_error) {
+                $in_session_error.remove();
+            }
+
+            // Ensure dates are in correct order.
+            if (Date.parse(begin_date) > Date.parse(end_date)) {
+                $begin_date_error_insertion.append($date_order_error)
+                $date_order_error.css('display', 'block');
+                $end_date.val('');
+                $begin_date.val('');
+                return;
+            } else if (Date.parse(begin_date) <= Date.parse(end_date)) {
+                $date_order_error.remove();
+            }
+
+            if (!$action_taken_detail.val()) {
+                $action_taken_detail_error_insertion.append($action_taken_detail_error);
+                $action_taken_detail_error.css('display', 'block');
+                return;
+            } else if ($action_taken_detail.val()) {
+                $action_taken_detail_error.remove();
+            }
+
+
+            var max_index = dates_array.length - 1;
+            var duration = (end_index - begin_index + 1);
+            var resolution = dates_array[Math.min(end_index + 1, max_index)];
+
+            $actual_duration.val(duration);
+            $action_duration.val(duration);
+            $action_resolution.val(resolution);
+            $submit_button.removeClass('disabled');
+            $update_button.removeClass('disabled');
+        });
+      }
+    });
+  })($j, window.tps_custom);
+</script>
+<style>
+  #validate_action_button, #validate-action-button {
+    width: 70px !important;
+    text-align: center;
+  }
+  #date-not-in-session, #dates-out-of-order, #action-taken-detail-blank {
+      display: none;
+  }
+  .dialog-footer-button {
+    display: flex !important;
+    width: 325px !important;
+    justify-content: space-between !important;
+  }
+  a.disabled {
+    display: inline-block !important;
+    pointer-events: none !important;
+  }
+</style>
+<div id="validate_action_button" class="floatrt" role="button">
+    <a id="validate-action-button" class="yui-button yui-link-button">Validate</a>
+    <span id="validate-action" tabindex="0" class="yui-button yui-link-button" style="display: none;">
+        <span class="first-child">
+            <a id="validate-action-link">Validate</a>
+        </span>
+    </span>
+</div>
+
+<div id="date-not-in-session" class="error-message" classname="error-message" errorfor="actionBeginDate">Date must be an in session day.</div>
+<div id="dates-out-of-order" class="error-message" classname="error-message" errorfor="actionBeginDate">End date must be later than begin date.</div>
+<div id="action-taken-detail-blank" class="error-message" classname="error-message" errorfor="actionResoDesc">Action Taken Detail Required (This will appear on the student discipline letter).</div>

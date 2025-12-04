@@ -1,0 +1,51 @@
+<script type="text/javascript">
+	;(function ($, tps_custom) {
+		$(function () {
+      var $incident_title_code = $('input[name="incident.title"]').val().substr(0, 3);
+      var $incident_id_label = $('#incidenidlabel');
+      var $form_message = $('#form-message');
+			var links = {
+				"weapons": {url: "https://www.google.com/url?q=https%3A%2F%2Foklahoma.gov%2Fcontent%2Fdam%2Fok%2Fen%2Fosde%2Fdocuments%2Fservices%2Fteacher-year%2Fprofessional-development%2Fprevention-state-laws-and-policies%2FWeaponReportForm.pdf&sa=D&sntz=1&usg=AOvVaw1fOSvgf3DfMIqJLcsiZMru", text: "Weapon Incident Report Form"},
+				"employee_ab": {url: "https://www.google.com/url?q=https%3A%2F%2Foklahoma.gov%2Fcontent%2Fdam%2Fok%2Fen%2Fosde%2Fdocuments%2Fservices%2Fteacher-year%2Fprofessional-development%2Fprevention-state-laws-and-policies%2FSchool_Employee_Assault_Report_Form.pdf&sa=D&sntz=1&usg=AOvVaw0dgkbJBMicePlOwTz8d6za", text: "Employee Assault Report Form"},
+				"threat_assessment": {url: "https://www.google.com/url?q=https%3A%2F%2Foklahoma.gov%2Fcontent%2Fdam%2Fok%2Fen%2Fosde%2Fdocuments%2Fservices%2Fteacher-year%2Fprofessional-development%2Fprevention-state-laws-and-policies%2FSchool_Employee_Assault_Report_Form.pdf&sa=D&sntz=1&usg=AOvVaw0dgkbJBMicePlOwTz8d6za", text: "Threat Assessment Report Form"}
+			};
+
+		var code_map = {
+			"402": links.weapons,
+			"405": links.weapons,
+			"418": links.weapons,
+			"408": links.employee_ab,
+			"314": links.threat_assessment,
+			"402": links.threat_assessment,
+			"403": links.threat_assessment,
+			"405": links.threat_assessment,
+			"409": links.threat_assessment,
+			"410": links.threat_assessment,
+			"416": links.threat_assessment,
+			"418": links.threat_assessment,
+		}
+
+      function validator() {
+        var errors = [];
+        if ($incident_title_code.length !== 3) errors.push('$incident_title_code absent or incorrect');
+        return errors;
+      }
+
+
+      if (tps_custom.load(validator, 'Adding incident form alert.')) {
+				var link_info = code_map[$incident_title_code];
+console.log("link info ", link_info);
+console.log("title code ", $incident_title_code);
+console.log("form message ", $form_message);
+				if (link_info) {
+          $form_message.find('a').attr('href', link_info.url).text(link_info.text);
+          $form_message.insertBefore($incident_id_label);
+          $form_message.removeClass('tps_custom--hidden');
+        }
+      }
+
+		});
+	})(jQuery, window.tps_custom);
+</script>
+
+<div id="form-message" class="feedback-alert tps_custom--hidden">This incident requires an incident related form be filled out<a href="" target="_blank"></a></div>
