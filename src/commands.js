@@ -18,15 +18,26 @@ function findFirstDifference(str1, str2) {
 // Helper function to get the actual root path for PowerSchool plugin files
 function getPluginFilesRoot(workspaceRoot) {
     if (!workspaceRoot) return null;
-    const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
-    let pluginRootPath = config.get('pluginWebRoot');
-    if (!pluginRootPath || pluginRootPath.trim() === '') {
-        return workspaceRoot;
+    const fs = require('fs');
+    const path = require('path');
+    // 1. If web_root is a top-level folder, use it as the root
+    const topLevelWebRoot = path.join(workspaceRoot, 'web_root');
+    if (fs.existsSync(topLevelWebRoot) && fs.statSync(topLevelWebRoot).isDirectory()) {
+        return topLevelWebRoot;
     }
-    const fullPluginRoot = path.join(workspaceRoot, pluginRootPath);
-    if (fs.existsSync(fullPluginRoot) && fs.statSync(fullPluginRoot).isDirectory()) {
-        return fullPluginRoot;
+
+    // 2. Otherwise, search recursively (one level deep) for web_root
+    const entries = fs.readdirSync(workspaceRoot, { withFileTypes: true });
+    for (const entry of entries) {
+        if (entry.isDirectory()) {
+            const possibleWebRoot = path.join(workspaceRoot, entry.name, 'web_root');
+            if (fs.existsSync(possibleWebRoot) && fs.statSync(possibleWebRoot).isDirectory()) {
+                return possibleWebRoot;
+            }
+        }
     }
+
+    // 3. Fallback: use workspace root
     return workspaceRoot;
 }
 
