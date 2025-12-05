@@ -17,13 +17,7 @@ const {
 
 function activate(context) {
     // Get workspace folder - use the first workspace folder as root
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    let workspaceRootPath = null;
-    let pluginFilesRoot = null;
-    if (workspaceFolders && workspaceFolders.length > 0) {
-        workspaceRootPath = workspaceFolders[0].uri.fsPath;
-        pluginFilesRoot = pathUtils.getPluginFilesRoot(workspaceRootPath);
-    }
+    let pluginFilesRoot = pathUtils.getPluginFilesRoot();
 
     // Initialize PowerSchool API and Tree Provider
     const api = new PowerSchoolAPI();
@@ -39,14 +33,8 @@ function activate(context) {
 
     // Watch for workspace changes to update the tree provider
     const workspaceWatcher = vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        let newWorkspaceRootPath = null;
-        let newPluginFilesRoot = null;
-        if (workspaceFolders && workspaceFolders.length > 0) {
-            newWorkspaceRootPath = workspaceFolders[0].uri.fsPath;
-            newPluginFilesRoot = pathUtils.getPluginFilesRoot(newWorkspaceRootPath);
-        }
-        treeProvider.localRootPath = newPluginFilesRoot;
+        pluginFilesRoot = pathUtils.getPluginFilesRoot();
+        treeProvider.localRootPath = pluginFilesRoot;
         treeProvider.refresh();
     });
 
@@ -56,11 +44,8 @@ function activate(context) {
             api.clearAuth();
             api.initialize();
             if (e.affectsConfiguration('ps-vscode-cpm.pluginWebRoot')) {
-                const workspaceFolders = vscode.workspace.workspaceFolders;
-                if (workspaceFolders && workspaceFolders.length > 0) {
-                    const newPluginFilesRoot = pathUtils.getPluginFilesRoot(workspaceFolders[0].uri.fsPath);
-                    treeProvider.localRootPath = newPluginFilesRoot;
-                }
+                pluginFilesRoot = pathUtils.getPluginFilesRoot();
+                treeProvider.localRootPath = pluginFilesRoot;
             }
             treeProvider.refresh();
         }
@@ -68,21 +53,21 @@ function activate(context) {
 
     // Watch for file saves to pre-fetch customContentId (improves publish performance)
     const fileSaveWatcher = vscode.workspace.onDidSaveTextDocument(async (document) => {
-        // Only process files in the workspace
-        if (!pluginFilesRoot || !document.fileName.startsWith(pluginFilesRoot)) {
+        // Always get latest pluginFilesRoot
+        const currentPluginFilesRoot = pathUtils.getPluginFilesRoot();
+        if (!currentPluginFilesRoot || !document.fileName.startsWith(currentPluginFilesRoot)) {
             return;
         }
         // Calculate PowerSchool path using path-utils
-        const remotePath = pathUtils.getRemotePathFromLocal(document.fileName, pluginFilesRoot);
+        const remotePath = pathUtils.getRemotePathFromLocal(document.fileName, currentPluginFilesRoot);
         // Skip if not a PowerSchool file type
         if (!/\.(html|htm|js|css|txt)$/i.test(remotePath)) {
             return;
         }
         if (api.contentIdCache.has(remotePath)) {
-                console.log(`4be File saved: ${require('path').basename(document.fileName)} (customContentId already cached)`);
+            console.log(`\u001b4be File saved: ${require('path').basename(document.fileName)} (customContentId already cached)`);
             return;
         }
-        
         api.downloadFileInfo(remotePath)
             .then(fileInfo => {
                 if (fileInfo?.activeCustomContentId) {
