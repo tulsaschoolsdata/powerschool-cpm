@@ -82,8 +82,6 @@ function activate(context) {
                 console.log(`4be File saved: ${require('path').basename(document.fileName)} (customContentId already cached)`);
             return;
         }
-        // Pre-fetch customContentId in background (don't await - fire and forget)
-        console.log(`💾 File saved: ${path.basename(document.fileName)}, pre-fetching customContentId...`);
         
         api.downloadFileInfo(remotePath)
             .then(fileInfo => {
