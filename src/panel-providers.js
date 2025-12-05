@@ -54,25 +54,9 @@ class ServerInfoProvider {
         const username = config.get('username', 'Not configured');
         const pluginWebRoot = config.get('pluginWebRoot', 'web_root');
         
-        // Get workspace folder path
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        let workspaceRoot = 'No workspace';
-        if (workspaceFolders && workspaceFolders.length > 0) {
-            workspaceRoot = workspaceFolders[0].uri.fsPath;
-        }
-        
-        // Calculate actual plugin web root path
-        let actualPluginRoot = workspaceRoot;
-        if (pluginWebRoot && pluginWebRoot.trim() !== '' && workspaceRoot !== 'No workspace') {
-            const fs = require('fs');
-            const fullPluginRoot = path.join(workspaceRoot, pluginWebRoot);
-            if (fs.existsSync(fullPluginRoot)) {
-                actualPluginRoot = fullPluginRoot;
-            }
-        }
-        
+        const pathUtils = require('./path-utils');
+        const pluginFilesRoot = pathUtils.getPluginFilesRoot();
         const items = [];
-        
         items.push(new PanelTreeItem(
             `Server: ${serverUrl}`,
             'serverInfo',
@@ -81,7 +65,6 @@ class ServerInfoProvider {
                 tooltip: `PowerSchool Server URL: ${serverUrl}`
             }
         ));
-        
         items.push(new PanelTreeItem(
             `User: ${username}`,
             'serverInfo',
@@ -90,17 +73,15 @@ class ServerInfoProvider {
                 tooltip: `PowerSchool Username: ${username}`
             }
         ));
-        
         items.push(new PanelTreeItem(
-            `Plugin Root: ${path.basename(actualPluginRoot)}`,
+            `Plugin Root: ${pluginFilesRoot ? path.basename(pluginFilesRoot) : '(none)'}`,
             'serverInfo',
             {
                 iconPath: new vscode.ThemeIcon('folder'),
-                tooltip: `Plugin Web Root: ${actualPluginRoot}`,
+                tooltip: `Plugin Web Root: ${pluginFilesRoot || '(none)'}`,
                 description: pluginWebRoot || '(workspace root)'
             }
         ));
-        
         return items;
     }
 }
