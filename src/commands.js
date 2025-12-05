@@ -15,35 +15,14 @@ function findFirstDifference(str1, str2) {
     return minLength; // Strings are identical up to the shorter length
 }
 
-// Helper function to get the actual root path for PowerSchool plugin files
-function getPluginFilesRoot(workspaceRoot) {
-    if (!workspaceRoot) return null;
-    const fs = require('fs');
-    const path = require('path');
-    // 1. If web_root is a top-level folder, use it as the root
-    const topLevelWebRoot = path.join(workspaceRoot, 'web_root');
-    if (fs.existsSync(topLevelWebRoot) && fs.statSync(topLevelWebRoot).isDirectory()) {
-        return topLevelWebRoot;
-    }
+// Use centralized path logic from path-utils
+const pathUtils = require('./path-utils');
 
-    // 2. Otherwise, search recursively (one level deep) for web_root
-    const entries = fs.readdirSync(workspaceRoot, { withFileTypes: true });
-    for (const entry of entries) {
-        if (entry.isDirectory()) {
-            const possibleWebRoot = path.join(workspaceRoot, entry.name, 'web_root');
-            if (fs.existsSync(possibleWebRoot) && fs.statSync(possibleWebRoot).isDirectory()) {
-                return possibleWebRoot;
-            }
-        }
-    }
-
-    // 3. Fallback: use workspace root
-    return workspaceRoot;
-}
+// Remove all local getPluginFilesRoot logic. Use pathUtils.getPluginFilesRoot() everywhere.
 
 // Helper to get the path to plugin.xml in the plugin root
-function getPluginXmlPath(workspaceRoot) {
-    const pluginRoot = getPluginFilesRoot(workspaceRoot);
+function getPluginXmlPath() {
+    const pluginRoot = pathUtils.getPluginFilesRoot();
     return path.join(pluginRoot, 'plugin.xml');
 }
 
@@ -97,32 +76,27 @@ function incrementVersion(version, type) {
 }
 
 // Helper function to create ZIP file using native zip command
-async function createPluginZip(workspaceRoot, pluginName, version, dirsToInclude) {
+async function createPluginZip(pluginName, version, dirsToInclude) {
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
-    
+    const pluginFilesRoot = pathUtils.getPluginFilesRoot();
     const zipFileName = `${pluginName}-${version}.zip`;
-    const zipFilePath = path.join(workspaceRoot, zipFileName);
-    
+    const zipFilePath = path.join(pluginFilesRoot, zipFileName);
     // Remove old zip if exists
     if (fs.existsSync(zipFilePath)) {
         fs.unlinkSync(zipFilePath);
     }
-    
     // Build list of items to include
     const itemsToZip = ['plugin.xml', ...dirsToInclude].filter(item => {
-        const itemPath = path.join(workspaceRoot, item);
+        const itemPath = path.join(pluginFilesRoot, item);
         return fs.existsSync(itemPath);
     });
-    
     if (itemsToZip.length === 0) {
         throw new Error('No items found to package. Ensure plugin.xml and directories exist.');
     }
-    
     // Create zip using native zip command
-    const zipCommand = `cd "${workspaceRoot}" && zip -r "${zipFileName}" ${itemsToZip.map(i => `"${i}"`).join(' ')}`;
-    
+    const zipCommand = `cd "${pluginFilesRoot}" && zip -r "${zipFileName}" ${itemsToZip.map(i => `"${i}"`).join(' ')}`;
     try {
         await execAsync(zipCommand);
         return zipFilePath;
@@ -200,55 +174,34 @@ function registerCommands(context, api, treeProvider) {
                 vscode.window.showInformationMessage('No file is currently open.');
                 return;
             }
-            
             const filePath = activeEditor.document.fileName;
-            const workspaceRoot = global.powerschoolCpmTreeProvider?.localRootPath;
-            
-            if (!workspaceRoot) {
-                vscode.window.showInformationMessage('No workspace folder is open.');
+            const pluginFilesRoot = global.powerschoolCpmTreeProvider?.localRootPath || require('./path-utils').getPluginFilesRoot();
+            if (!pluginFilesRoot) {
+                vscode.window.showInformationMessage('No plugin files root is set.');
                 return;
             }
-            
-            const relativePath = path.relative(workspaceRoot, filePath);
-            
+            const relativePath = path.relative(pluginFilesRoot, filePath);
             if (!relativePath || relativePath.startsWith('..')) {
                 vscode.window.showInformationMessage(
-                    `📄 Current file: ${path.basename(filePath)}\\n` +
-                    `⚠️  This file is outside the workspace.\\n` +
-                    `Files must be inside the workspace to sync with PowerSchool.`
+                    `📄 Current file: ${path.basename(filePath)}\n` +
+                    `⚠️  This file is outside the plugin files root.\n` +
+                    `Files must be inside the plugin files root to sync with PowerSchool.`
                 );
                 return;
             }
-            
-            const powerSchoolPath = '/' + relativePath.replace(/\\\\/g, '/');
-            
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            const actualWorkspaceRoot = workspaceFolders && workspaceFolders.length > 0 ? workspaceFolders[0].uri.fsPath : null;
-            const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
-            const webRootSubdir = config.get('pluginWebRoot') || 'web_root';
-            const isInWebRoot = actualWorkspaceRoot && workspaceRoot !== actualWorkspaceRoot;
-            
-            let message = `📄 Local file: ${relativePath}\\n` +
-                `🔗 PowerSchool path: ${powerSchoolPath}\\n\\n`;
-            
-            if (isInWebRoot) {
-                message += `📂 Plugin structure: workspace/${webRootSubdir}/${relativePath}\\n` +
-                    `This matches PowerSchool plugin web_root structure.\\n`;
-            } else {
-                message += `This file syncs with PowerSchool at the path shown above.\\n`;
-            }
-            
+            const powerSchoolPath = '/' + relativePath.replace(/\\/g, '/');
+            let message = `📄 Local file: ${relativePath}\n` +
+                `🔗 PowerSchool path: ${powerSchoolPath}\n\n`;
+            message += `This file syncs with PowerSchool at the path shown above.\n`;
             const choice = await vscode.window.showInformationMessage(
                 message,
                 'Copy PowerSchool Path',
                 'OK'
             );
-            
             if (choice === 'Copy PowerSchool Path') {
                 await vscode.env.clipboard.writeText(powerSchoolPath);
                 vscode.window.showInformationMessage(`Copied: ${powerSchoolPath}`);
             }
-            
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to show file path: ${error.message}`);
         }
@@ -262,45 +215,36 @@ function registerCommands(context, api, treeProvider) {
     // Setup web root command
     commands.push(registerCommandSafely('ps-vscode-cpm.setupWebRoot', async () => {
         try {
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (!workspaceFolders || workspaceFolders.length === 0) {
+            const pluginFilesRoot = pathUtils.getPluginFilesRoot();
+            if (!pluginFilesRoot) {
                 vscode.window.showErrorMessage('No workspace folder is open. Please open a folder first.');
                 return;
             }
-            
-            const workspaceRoot = workspaceFolders[0].uri.fsPath;
             const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
             const webRootSubdir = config.get('pluginWebRoot') || 'web_root';
-            const webRootPath = path.join(workspaceRoot, webRootSubdir);
-            
+            const webRootPath = path.join(pluginFilesRoot, webRootSubdir);
             if (fs.existsSync(webRootPath)) {
-                const info = `📂 Plugin web_root directory already exists at:\\n${webRootSubdir}/\\n\\n` +
+                const info = `📂 Plugin web_root directory already exists at:\n${webRootSubdir}/\n\n` +
                     `Files downloaded from PowerSchool will be saved here to match your plugin structure.`;
                 vscode.window.showInformationMessage(info);
                 return;
             }
-            
             const choice = await vscode.window.showInformationMessage(
-                `The plugin web_root directory doesn't exist yet.\\n\\n` +
-                `Create '${webRootSubdir}/' directory?\\n\\n` +
+                `The plugin web_root directory doesn't exist yet.\n\n` +
+                `Create '${webRootSubdir}/' directory?\n\n` +
                 `This directory will hold PowerSchool files matching your plugin structure.`,
                 'Create Directory',
                 'Cancel'
             );
-            
             if (choice === 'Create Directory') {
                 fs.mkdirSync(webRootPath, { recursive: true });
-                
-                const newPluginFilesRoot = getPluginFilesRoot(workspaceRoot);
-                treeProvider.localRootPath = newPluginFilesRoot;
+                treeProvider.localRootPath = webRootPath;
                 treeProvider.refresh();
-                
                 vscode.window.showInformationMessage(
-                    `✅ Created ${webRootSubdir}/ directory.\\n\\n` +
+                    `✅ Created ${webRootSubdir}/ directory.\n\n` +
                     `PowerSchool files will now be saved here to match your plugin structure.`
                 );
             }
-            
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to setup web_root: ${error.message}`);
         }
@@ -399,12 +343,12 @@ function registerFileCommands(context, api, treeProvider) {
             // (Similar to original implementation but simplified for brevity)
             
             const remotePath = `${targetPath}/${fileName}`;
-            const workspaceRoot = global.powerschoolCpmTreeProvider?.localRootPath;
-            if (!workspaceRoot) {
+            const pluginFilesRoot = global.powerschoolCpmTreeProvider?.localRootPath || pathUtils.getPluginFilesRoot();
+            if (!pluginFilesRoot) {
                 vscode.window.showErrorMessage('No workspace folder is open. Please open a folder first.');
                 return;
             }
-            const localFilePath = path.join(workspaceRoot, remotePath.replace(/^\/+/g, ''));
+            const localFilePath = path.join(pluginFilesRoot, remotePath.replace(/^\/+/g, ''));
             
             if (fs.existsSync(localFilePath)) {
                 const overwrite = await vscode.window.showWarningMessage(
@@ -425,10 +369,10 @@ function registerFileCommands(context, api, treeProvider) {
             const document = await vscode.workspace.openTextDocument(localFilePath);
             await vscode.window.showTextDocument(document);
             
-            const relativeToWorkspace = path.relative(workspaceRoot, localFilePath);
+            const relativeToRoot = path.relative(pluginFilesRoot, localFilePath);
             vscode.window.showInformationMessage(
-                `Created ${fileName} at ${relativeToWorkspace}\\n` +
-                `This matches PowerSchool path: ${remotePath}\\n` +
+                `Created ${fileName} at ${relativeToRoot}\n` +
+                `This matches PowerSchool path: ${remotePath}\n` +
                 `Edit and use "Publish to PowerSchool" when ready.`
             );
             
@@ -446,21 +390,19 @@ function registerFileCommands(context, api, treeProvider) {
                 return;
             }
             
-            const filePath = activeEditor.document.fileName;
-            const workspaceRoot = global.powerschoolCpmTreeProvider?.localRootPath;
-            if (!workspaceRoot) {
+            const pluginFilesRoot = global.powerschoolCpmTreeProvider?.localRootPath || pathUtils.getPluginFilesRoot();
+            if (!pluginFilesRoot) {
                 vscode.window.showErrorMessage('No workspace folder is open. Please open a folder first.');
                 return;
             }
-            const relativePath = path.relative(workspaceRoot, filePath);
-            
+            const filePath = activeEditor.document.fileName;
+            // Compute relative path from pluginFilesRoot
+            const relativePath = path.relative(pluginFilesRoot, filePath).replace(/\\/g, '/');
             if (!relativePath || relativePath.startsWith('..')) {
-                vscode.window.showWarningMessage('File is not in the current workspace.');
+                vscode.window.showWarningMessage('File is not in the plugin web_root.');
                 return;
             }
-            
-            const remotePath = '/' + relativePath.replace(/\\\\/g, '/');
-            
+            const remotePath = '/' + relativePath.replace(/\/+/g, '/');
             const confirmedPath = await vscode.window.showInputBox({
                 prompt: 'Confirm or edit the PowerSchool path for this file',
                 value: remotePath,
@@ -470,9 +412,7 @@ function registerFileCommands(context, api, treeProvider) {
                     return null;
                 }
             });
-            
             if (!confirmedPath) return;
-            
             vscode.window.showInformationMessage(`Publishing ${path.basename(filePath)} to PowerSchool...`);
             
             if (activeEditor.document.isDirty) {
@@ -520,20 +460,11 @@ function registerPluginCommands(context, api, treeProvider) {
     // Package plugin command
     commands.push(registerCommandSafely('ps-vscode-cpm.packagePlugin', async () => {
         try {
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (!workspaceFolders || workspaceFolders.length === 0) {
-                vscode.window.showErrorMessage('No workspace folder is open. Please open a plugin folder first.');
-                return;
-            }
-            
-            const workspaceRoot = workspaceFolders[0].uri.fsPath;
-            const pluginXmlPath = getPluginXmlPath(workspaceRoot);
-            
+            const pluginXmlPath = getPluginXmlPath();
             if (!fs.existsSync(pluginXmlPath)) {
                 vscode.window.showErrorMessage('plugin.xml not found in plugin root. This command is for packaging PowerSchool plugins.');
                 return;
             }
-            
             const currentVersion = parsePluginVersion(pluginXmlPath);
             
             const changeVersion = await vscode.window.showQuickPick(['No - Use current version', 'Yes - Update version'], {
@@ -620,7 +551,7 @@ function registerPluginCommands(context, api, treeProvider) {
                 'pagecataloging', 'PageCataloging'
             ];
             
-            const pluginRoot = getPluginFilesRoot(workspaceRoot);
+            const pluginRoot = pathUtils.getPluginFilesRoot();
             const dirsToInclude = potentialDirs.filter(dir => {
                 const dirPath = path.join(pluginRoot, dir);
                 return fs.existsSync(dirPath) && fs.statSync(dirPath).isDirectory();
@@ -658,7 +589,7 @@ function registerPluginCommands(context, api, treeProvider) {
             if (confirmPackage !== 'Package') return;
             
             vscode.window.showInformationMessage('Creating plugin package...');
-            const zipFilePath = await createPluginZip(pluginRoot, pluginName, versionToUse, uniqueDirs);
+            const zipFilePath = await createPluginZip(pluginName, versionToUse, uniqueDirs);
             
             const zipFileName = path.basename(zipFilePath);
             const openFolder = await vscode.window.showInformationMessage(
@@ -802,7 +733,6 @@ function registerSnippetCommands(context, api, treeProvider) {
                         return null;
                     }
                 });
-                
                 if (!fileName) return;
 
                 const pathOptions = [
@@ -815,13 +745,11 @@ function registerSnippetCommands(context, api, treeProvider) {
                     { label: '/images/javascript', description: 'JavaScript files' },
                     { label: 'Custom path...', description: 'Enter a custom PowerSchool path' }
                 ];
-                
                 const selectedPath = await vscode.window.showQuickPick(pathOptions, {
                     placeHolder: 'Select where to create the file in PowerSchool'
                 });
-                
                 if (!selectedPath) return;
-                
+
                 let targetPath = selectedPath.label;
                 if (selectedPath.label === 'Custom path...') {
                     const customPath = await vscode.window.showInputBox({
@@ -836,25 +764,25 @@ function registerSnippetCommands(context, api, treeProvider) {
                     if (!customPath) return;
                     targetPath = customPath;
                 }
-                
+
                 const remotePath = `${targetPath}/${fileName}`;
-                const workspaceRoot = global.powerschoolCpmTreeProvider?.localRootPath;
-                if (!workspaceRoot) {
+                const pluginFilesRoot = global.powerschoolCpmTreeProvider?.localRootPath || pathUtils.getPluginFilesRoot();
+                if (!pluginFilesRoot) {
                     vscode.window.showErrorMessage('No workspace folder is open. Please open a folder first.');
                     return;
                 }
-                const localFilePath = path.join(workspaceRoot, remotePath.replace(/^\/+/g, ''));
-                
+                const localFilePath = path.join(pluginFilesRoot, remotePath.replace(/^\/+/g, ''));
+
                 const localDir = path.dirname(localFilePath);
                 if (!fs.existsSync(localDir)) {
                     fs.mkdirSync(localDir, { recursive: true });
                 }
-                
+
                 fs.writeFileSync(localFilePath, template.content);
-                
+
                 const document = await vscode.workspace.openTextDocument(localFilePath);
                 await vscode.window.showTextDocument(document);
-                
+
                 vscode.window.showInformationMessage(`Created ${fileName} from ${template.name} template. Edit and use "Publish to PowerSchool" when ready.`);
 
             } catch (error) {
@@ -871,6 +799,5 @@ module.exports = {
     registerFileCommands,
     registerPluginCommands,
     registerSnippetCommands,
-    getPluginFilesRoot,
     findFirstDifference
 };
