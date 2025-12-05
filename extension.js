@@ -1,13 +1,13 @@
 const vscode = require('vscode');
 const { PowerSchoolAPI } = require('./src/powerschool-api');
 const { PowerSchoolTreeProvider } = require('./src/tree-provider');
-const { 
-    registerCommands, 
-    registerFileCommands, 
-    registerPluginCommands, 
-    registerSnippetCommands,
-    getPluginFilesRoot 
+const {
+    registerCommands,
+    registerFileCommands,
+    registerPluginCommands,
+    registerSnippetCommands
 } = require('./src/commands');
+const pathUtils = require('./src/path-utils');
 const {
     ServerInfoProvider,
     CommandsProvider,
@@ -20,10 +20,9 @@ function activate(context) {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     let workspaceRootPath = null;
     let pluginFilesRoot = null;
-    
     if (workspaceFolders && workspaceFolders.length > 0) {
         workspaceRootPath = workspaceFolders[0].uri.fsPath;
-        pluginFilesRoot = getPluginFilesRoot(workspaceRootPath);
+        pluginFilesRoot = pathUtils.getPluginFilesRoot(workspaceRootPath);
     }
 
     // Initialize PowerSchool API and Tree Provider
@@ -43,12 +42,10 @@ function activate(context) {
         const workspaceFolders = vscode.workspace.workspaceFolders;
         let newWorkspaceRootPath = null;
         let newPluginFilesRoot = null;
-        
         if (workspaceFolders && workspaceFolders.length > 0) {
             newWorkspaceRootPath = workspaceFolders[0].uri.fsPath;
-            newPluginFilesRoot = getPluginFilesRoot(newWorkspaceRootPath);
+            newPluginFilesRoot = pathUtils.getPluginFilesRoot(newWorkspaceRootPath);
         }
-        
         treeProvider.localRootPath = newPluginFilesRoot;
         treeProvider.refresh();
     });
@@ -56,20 +53,15 @@ function activate(context) {
     // Watch for configuration changes to update API settings
     const configWatcher = vscode.workspace.onDidChangeConfiguration(e => {
         if (e.affectsConfiguration('ps-vscode-cpm')) {
-            // Clear authentication and reload configuration
             api.clearAuth();
-            api.initialize(); // Reload configuration from VS Code settings
-            
-            // Check if web_root path changed
+            api.initialize();
             if (e.affectsConfiguration('ps-vscode-cpm.pluginWebRoot')) {
                 const workspaceFolders = vscode.workspace.workspaceFolders;
                 if (workspaceFolders && workspaceFolders.length > 0) {
-                    const newPluginFilesRoot = getPluginFilesRoot(workspaceFolders[0].uri.fsPath);
+                    const newPluginFilesRoot = pathUtils.getPluginFilesRoot(workspaceFolders[0].uri.fsPath);
                     treeProvider.localRootPath = newPluginFilesRoot;
                 }
             }
-            
-            // Refresh the tree to apply new settings
             treeProvider.refresh();
         }
     });
@@ -80,23 +72,16 @@ function activate(context) {
         if (!pluginFilesRoot || !document.fileName.startsWith(pluginFilesRoot)) {
             return;
         }
-        
-        // Calculate PowerSchool path
-        const path = require('path');
-        const relativePath = path.relative(pluginFilesRoot, document.fileName);
-        const remotePath = '/' + relativePath.replace(/\\/g, '/');
-        
+        // Calculate PowerSchool path using path-utils
+        const remotePath = pathUtils.getRemotePathFromLocal(document.fileName, pluginFilesRoot);
         // Skip if not a PowerSchool file type
         if (!/\.(html|htm|js|css|txt)$/i.test(remotePath)) {
             return;
         }
-        
-        // Check if already cached - if so, skip the slow API call
         if (api.contentIdCache.has(remotePath)) {
-            console.log(`💾 File saved: ${path.basename(document.fileName)} (customContentId already cached)`);
+                console.log(`4be File saved: ${require('path').basename(document.fileName)} (customContentId already cached)`);
             return;
         }
-        
         // Pre-fetch customContentId in background (don't await - fire and forget)
         console.log(`💾 File saved: ${path.basename(document.fileName)}, pre-fetching customContentId...`);
         
