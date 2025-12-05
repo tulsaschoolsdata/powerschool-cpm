@@ -117,7 +117,8 @@ class PowerSchoolTreeItem extends vscode.TreeItem {
 class PowerSchoolTreeProvider {
     constructor(psApi, localRootPath) {
         this.psApi = psApi;
-        this.localRootPath = localRootPath;
+        // Always resolve localRootPath using pathUtils.getPluginFilesRoot
+        this.localRootPath = pathUtils.getPluginFilesRoot(localRootPath);
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
         this.treeCache = new Map();
@@ -126,6 +127,11 @@ class PowerSchoolTreeProvider {
         this.pluginMappingsLoaded = false;
         this.folderDecorations = new Map();  // Track folder decoration types by path
     }
+        setLocalRootPath(newRootPath) {
+            // Always resolve using pathUtils.getPluginFilesRoot
+            this.localRootPath = pathUtils.getPluginFilesRoot(newRootPath);
+            this.refresh();
+        }
     
     refresh() {
         this.treeCache.clear();

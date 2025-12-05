@@ -1,4 +1,5 @@
 
+
 // src/path-utils.js
 // Centralized path and file operation utilities for PowerSchool CPM extension
 
@@ -8,22 +9,41 @@ const vscode = require('vscode');
 
 /**
  * Get the pluginFilesRoot (always includes web_root) for the current workspace.
- * @param {string} [workspaceRoot] - Optional workspace root path. If not provided, uses first workspace folder.
  * @returns {string|null}
  */
-function getPluginFilesRoot(workspaceRoot) {
-    if (!workspaceRoot) {
-        const folders = vscode.workspace.workspaceFolders;
-        if (!folders || folders.length === 0) return null;
-        workspaceRoot = folders[0].uri.fsPath;
+function getPluginFilesRoot() {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) return null;
+    const workspaceRoot = folders[0].uri.fsPath;
+    const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
+    const pluginRootSetting = config.get('plugin_root', '');
+    const pluginWebRootSetting = config.get('pluginWebRoot', 'web_root');
+
+    // If plugin_root is set, use {workspaceRoot}/{plugin_root}/web_root
+    if (pluginRootSetting) {
+        const customWebRoot = path.join(workspaceRoot, pluginRootSetting, 'web_root');
+        if (fs.existsSync(customWebRoot) && fs.statSync(customWebRoot).isDirectory()) {
+            return customWebRoot;
+        }
+        // If only plugin_root exists, fallback to {workspaceRoot}/{plugin_root}
+        const customRoot = path.join(workspaceRoot, pluginRootSetting);
+        if (fs.existsSync(customRoot) && fs.statSync(customRoot).isDirectory()) {
+            return customRoot;
+        }
     }
-    // Always resolve to workspaceRoot/web_root
-    return path.join(workspaceRoot, 'web_root');
+    // If pluginWebRoot is set (and not handled above), use workspaceRoot/pluginWebRoot
+    if (pluginWebRootSetting && (!pluginRootSetting || pluginWebRootSetting !== pluginRootSetting)) {
+        const topLevelWebRoot = path.join(workspaceRoot, pluginWebRootSetting);
+        if (fs.existsSync(topLevelWebRoot) && fs.statSync(topLevelWebRoot).isDirectory()) {
+            return topLevelWebRoot;
+        }
+    }
+    // Fallback: use workspace root
+    return workspaceRoot;
 }
 
 /**
- * Given a PowerSchool remote path (e.g. /admin/tps_custom/file.html),
- * return the absolute local file path under web_root.
+ * Given a PowerSchool remote path (with leading slash), return the local file path (always under pluginFilesRoot).
  * @param {string} remotePath
  * @param {string} [pluginFilesRoot]
  * @returns {string}
