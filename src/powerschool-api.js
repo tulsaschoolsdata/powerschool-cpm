@@ -67,6 +67,7 @@ class PowerSchoolAPI {
 
     // Initialize from VS Code settings
     initialize() {
+        console.log('[PS-API] 🔧 Initializing PowerSchool API from settings...');
         const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
         this.baseUrl = config.get('serverUrl', '').replace(/\/$/, '');
         this.clientId = config.get('clientId');
@@ -75,9 +76,17 @@ class PowerSchoolAPI {
         this.password = config.get('password');
         this.authMethod = config.get('authMethod', 'hybrid');
         
+        console.log('[PS-API]   📍 baseUrl:', this.baseUrl);
+        console.log('[PS-API]   🔑 clientId:', this.clientId);
+        console.log('[PS-API]   🔒 clientSecret:', this.clientSecret ? '(set)' : '(NOT SET)');
+        console.log('[PS-API]   👤 username:', this.username);
+        console.log('[PS-API]   🔐 password:', this.password ? '(set)' : '(NOT SET)');
+        console.log('[PS-API]   🔀 authMethod:', this.authMethod);
+        
         if (!this.baseUrl) {
             throw new Error('PowerSchool server URL not configured. Please set ps-vscode-cpm.serverUrl in settings.');
         }
+        console.log('[PS-API] ✅ Initialization complete');
     }
 
     clearAuth() {
@@ -186,13 +195,18 @@ class PowerSchoolAPI {
     }
 
     getCookieHeader() {
-        if (this.cookies.size === 0) return '';
+        if (this.cookies.size === 0) {
+            console.log('[COOKIES] ⚠️ No cookies available!');
+            return '';
+        }
         
         const cookieStrings = [];
         for (const [name, value] of this.cookies) {
             cookieStrings.push(`${name}=${value}`);
         }
-        return cookieStrings.join('; ');
+        const header = cookieStrings.join('; ');
+        console.log('[COOKIES] 🍪 Cookie header:', header.substring(0, 100) + '...');
+        return header;
     }
 
     async getLoginPage() {
@@ -297,21 +311,28 @@ class PowerSchoolAPI {
     }
 
     async ensureSessionAuth() {
+        console.log('[SESSION] 🔍 Checking session...');
         let isLoggedIn = await this.checkSession();
+        console.log('[SESSION]   isLoggedIn:', isLoggedIn);
         
         if (!isLoggedIn) {
             if (!this.username || !this.password) {
+                console.error('[SESSION] ❌ Missing credentials!');
                 throw new Error('PowerSchool session credentials missing. Please configure username and password in VS Code settings.');
             }
             
+            console.log('[SESSION] 🔐 Logging in...');
             await this.getLoginPage();
             isLoggedIn = await this.submitLogin();
+            console.log('[SESSION]   Login result:', isLoggedIn);
             
             if (!isLoggedIn) {
+                console.error('[SESSION] ❌ Login failed!');
                 throw new Error('PowerSchool login failed. Please check your credentials.');
             }
         }
         
+        console.log('[SESSION] ✅ Session authenticated');
         return true;
     }
 
@@ -326,9 +347,14 @@ class PowerSchoolAPI {
     }
 
     async makeRequest(endpoint, method = 'GET', data = null) {
+        console.log('[MAKE-REQUEST] 📡', method, endpoint);
+        const authMethod = this.getAuthMethodForEndpoint(endpoint);
+        console.log('[MAKE-REQUEST]   Auth method:', authMethod);
+        
         await this.ensureAuthenticated(endpoint);
         
         const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        console.log('[MAKE-REQUEST]   Auth headers:', Object.keys(authHeaders));
         const isPost = method === 'POST';
         
         const options = {
@@ -355,6 +381,10 @@ class PowerSchoolAPI {
                 let responseData = '';
                 res.on('data', chunk => responseData += chunk);
                 res.on('end', () => {
+                    console.log('[MAKE-REQUEST] ← HTTP', res.statusCode);
+                    if (res.statusCode !== 200) {
+                        console.log('[MAKE-REQUEST] ← Response:', responseData.substring(0, 200));
+                    }
                     try {
                         const result = responseData ? JSON.parse(responseData) : {};
                         resolve({ statusCode: res.statusCode, data: result });
@@ -421,17 +451,6 @@ class PowerSchoolAPI {
         }
 
         return response.data;
-    }
-
-    async getPluginFileMappings() {
-        const endpoint = '/ws/schema/query/com.powerschool.cpm.file.mappings';
-        const response = await this.makeRequest(endpoint, 'POST', {});
-        
-        if (response.statusCode !== 200) {
-            throw new Error(`Failed to get plugin mappings: HTTP ${response.statusCode}`);
-        }
-
-        return response.data?.record || [];
     }
 
     async downloadFileContent(filePath) {
