@@ -53,7 +53,6 @@ class PowerSchoolAPI {
         
         const stored = this.workspaceState.get('ps-cpm-contentIdCache', {});
         this.contentIdCache = new Map(Object.entries(stored));
-        console.log('💾 Loaded', this.contentIdCache.size, 'cached customContentIds from storage');
     }
     
     // Save cache to persistent storage
@@ -62,12 +61,10 @@ class PowerSchoolAPI {
         
         const obj = Object.fromEntries(this.contentIdCache);
         this.workspaceState.update('ps-cpm-contentIdCache', obj);
-        console.log('💾 Saved', this.contentIdCache.size, 'customContentIds to storage');
     }
 
     // Initialize from VS Code settings
     initialize() {
-        console.log('[PS-API] 🔧 Initializing PowerSchool API from settings...');
         const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
         this.baseUrl = config.get('serverUrl', '').replace(/\/$/, '');
         this.clientId = config.get('clientId');
@@ -76,17 +73,9 @@ class PowerSchoolAPI {
         this.password = config.get('password');
         this.authMethod = config.get('authMethod', 'hybrid');
         
-        console.log('[PS-API]   📍 baseUrl:', this.baseUrl);
-        console.log('[PS-API]   🔑 clientId:', this.clientId);
-        console.log('[PS-API]   🔒 clientSecret:', this.clientSecret ? '(set)' : '(NOT SET)');
-        console.log('[PS-API]   👤 username:', this.username);
-        console.log('[PS-API]   🔐 password:', this.password ? '(set)' : '(NOT SET)');
-        console.log('[PS-API]   🔀 authMethod:', this.authMethod);
-        
         if (!this.baseUrl) {
             throw new Error('PowerSchool server URL not configured. Please set ps-vscode-cpm.serverUrl in settings.');
         }
-        console.log('[PS-API] ✅ Initialization complete');
     }
 
     clearAuth() {
@@ -106,9 +95,11 @@ class PowerSchoolAPI {
         if (this.authMethod === 'session') return 'session';
         if (this.authMethod === 'oauth') return 'oauth';
         
-        // HYBRID: CPM and PowerQuery endpoints need session, others use OAuth
+        // HYBRID: CPM, PowerQuery, and /admin/ paths need session, others use OAuth
         if (this.authMethod === 'hybrid') {
-            if (endpoint.includes('/ws/cpm/') || endpoint.includes('/ws/schema/query/')) {
+            if (endpoint.includes('/ws/cpm/') || 
+                endpoint.includes('/ws/schema/query/') ||
+                endpoint.startsWith('/admin/')) {
                 return 'session';
             }
             return 'oauth';
@@ -196,7 +187,6 @@ class PowerSchoolAPI {
 
     getCookieHeader() {
         if (this.cookies.size === 0) {
-            console.log('[COOKIES] ⚠️ No cookies available!');
             return '';
         }
         
@@ -204,9 +194,7 @@ class PowerSchoolAPI {
         for (const [name, value] of this.cookies) {
             cookieStrings.push(`${name}=${value}`);
         }
-        const header = cookieStrings.join('; ');
-        console.log('[COOKIES] 🍪 Cookie header:', header.substring(0, 100) + '...');
-        return header;
+        return cookieStrings.join('; ');
     }
 
     async getLoginPage() {
@@ -311,28 +299,21 @@ class PowerSchoolAPI {
     }
 
     async ensureSessionAuth() {
-        console.log('[SESSION] 🔍 Checking session...');
         let isLoggedIn = await this.checkSession();
-        console.log('[SESSION]   isLoggedIn:', isLoggedIn);
         
         if (!isLoggedIn) {
             if (!this.username || !this.password) {
-                console.error('[SESSION] ❌ Missing credentials!');
                 throw new Error('PowerSchool session credentials missing. Please configure username and password in VS Code settings.');
             }
             
-            console.log('[SESSION] 🔐 Logging in...');
             await this.getLoginPage();
             isLoggedIn = await this.submitLogin();
-            console.log('[SESSION]   Login result:', isLoggedIn);
             
             if (!isLoggedIn) {
-                console.error('[SESSION] ❌ Login failed!');
                 throw new Error('PowerSchool login failed. Please check your credentials.');
             }
         }
         
-        console.log('[SESSION] ✅ Session authenticated');
         return true;
     }
 
@@ -347,14 +328,11 @@ class PowerSchoolAPI {
     }
 
     async makeRequest(endpoint, method = 'GET', data = null) {
-        console.log('[MAKE-REQUEST] 📡', method, endpoint);
         const authMethod = this.getAuthMethodForEndpoint(endpoint);
-        console.log('[MAKE-REQUEST]   Auth method:', authMethod);
         
         await this.ensureAuthenticated(endpoint);
         
         const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
-        console.log('[MAKE-REQUEST]   Auth headers:', Object.keys(authHeaders));
         const isPost = method === 'POST';
         
         const options = {
@@ -381,10 +359,6 @@ class PowerSchoolAPI {
                 let responseData = '';
                 res.on('data', chunk => responseData += chunk);
                 res.on('end', () => {
-                    console.log('[MAKE-REQUEST] ← HTTP', res.statusCode);
-                    if (res.statusCode !== 200) {
-                        console.log('[MAKE-REQUEST] ← Response:', responseData.substring(0, 200));
-                    }
                     try {
                         const result = responseData ? JSON.parse(responseData) : {};
                         resolve({ statusCode: res.statusCode, data: result });
@@ -453,6 +427,53 @@ class PowerSchoolAPI {
         return response.data;
     }
 
+    /**
+     * Downloads and parses plugin mappings from a server-generated JSON file.
+     * The JSON file contains tlist_sql template that generates plugin metadata.
+     * Uses direct HTTP access (not /ws/cpm/builtintext) to get the executed JSON.
+     * Expected format: [{ "path": "/path/to/file.html", "plugin": "PluginName", "enabled": "1" }]
+     */
+    async getPluginMappingsFromJson(jsonFilePath = '/admin/tps_custom/plugin_data.json') {
+        try {
+            const endpoint = jsonFilePath;
+            const response = await this.makeRequest(endpoint);
+            
+            if (response.statusCode !== 200) {
+                return null;
+            }
+
+            // Parse the JSON content
+            let pluginData;
+            try {
+                if (typeof response.data === 'string') {
+                    pluginData = JSON.parse(response.data);
+                } else {
+                    pluginData = response.data;
+                }
+            } catch (parseError) {
+                return null;
+            }
+
+            // Normalize to object format if it's an array
+            if (Array.isArray(pluginData)) {
+                const normalized = {};
+                pluginData.forEach(item => {
+                    if (item.path) {
+                        normalized[item.path] = {
+                            plugin: item.plugin || item.pluginName || 'Unknown',
+                            enabled: item.enabled !== false
+                        };
+                    }
+                });
+                pluginData = normalized;
+            }
+            
+            return pluginData;
+        } catch (error) {
+            return null;
+        }
+    }
+
     async downloadFileContent(filePath) {
         const queryParams = new URLSearchParams({
             LoadFolderInfo: 'false',
@@ -502,23 +523,17 @@ class PowerSchoolAPI {
     }
 
     async uploadFileContent(filePath, content) {
-        console.log('📤 uploadFileContent called - filePath:', filePath, 'content length:', content.length);
         const endpoint = '/ws/cpm/customPageContent';
-        console.log('🔍 Calling ensureAuthenticated for endpoint:', endpoint);
         await this.ensureAuthenticated(endpoint);
-        console.log('✅ Authentication successful');
         
         // FIRST: Check cache for existing customContentId (fastest path)
         const cachedId = this.contentIdCache.get(filePath);
         if (cachedId) {
-            console.log('💾 Using cached customContentId:', cachedId, '(fast path)');
             try {
                 const result = await this._doUpload(filePath, content, cachedId);
-                console.log('✅ Upload succeeded with cached ID');
                 return result;
             } catch (error) {
                 // Cache is stale - clear it and continue to fetch fresh ID
-                console.log('⚠️ Cached ID failed, clearing cache and fetching fresh ID');
                 this.contentIdCache.delete(filePath);
                 // Fall through to fetch actual ID
             }
@@ -526,31 +541,24 @@ class PowerSchoolAPI {
         
         // SECOND: No cache, try to fetch actual customContentId from PowerSchool
         // This handles existing files that weren't cached yet
-        console.log('🔍 No cached ID, checking if file exists on PowerSchool...');
         try {
             const fileInfo = await this.downloadFileInfo(filePath);
             const customContentId = fileInfo?.activeCustomContentId;
             
             if (customContentId) {
-                console.log('📤 File exists with customContentId:', customContentId);
                 this.contentIdCache.set(filePath, customContentId);
-                this.saveCacheToStorage(); // Persist to storage
-                console.log('💾 Cached customContentId for future uploads');
+                this.saveCacheToStorage();
                 return await this._doUpload(filePath, content, customContentId);
             }
         } catch (error) {
             // File doesn't exist on PowerSchool - it's a new file
-            console.log('ℹ️ File not found on PowerSchool, treating as new file');
         }
         
         // THIRD: File is new, use customContentId: 0
-        console.log('📤 Uploading as new file with customContentId: 0');
         try {
             const result = await this._doUpload(filePath, content, 0);
-            console.log('✅ Upload succeeded (new file created)');
             return result;
         } catch (error) {
-            console.log('❌ Upload failed:', error.message);
             throw error;
         }
     }
@@ -599,16 +607,13 @@ class PowerSchoolAPI {
                 res.on('data', chunk => data += chunk);
                 res.on('end', () => {
                     if (res.statusCode >= 200 && res.statusCode < 300) {
-                        console.log('✅ Upload successful - HTTP', res.statusCode);
                         try {
                             const result = JSON.parse(data);
                             
                             // PowerSchool returns HTTP 200 even on errors - check the message
                             if (result.returnMessage && result.returnMessage.includes('system error')) {
-                                console.log('❌ PowerSchool error:', result.returnMessage);
                                 reject(new Error(result.returnMessage));
                             } else if (result.returnMessage && result.returnMessage.includes('could not be saved')) {
-                                console.log('❌ PowerSchool error:', result.returnMessage);
                                 reject(new Error(result.returnMessage));
                             } else {
                                 resolve(result);
@@ -617,14 +622,12 @@ class PowerSchoolAPI {
                             resolve({ success: true, raw: data });
                         }
                     } else {
-                        console.log('❌ Upload failed - HTTP', res.statusCode);
                         reject(new Error(`Upload failed: HTTP ${res.statusCode}`));
                     }
                 });
             });
             
             req.on('error', error => {
-                console.log('❌ Upload error:', error.message);
                 reject(error);
             });
             req.write(multipartData);
@@ -668,8 +671,7 @@ class PowerSchoolAPI {
                             // Cache the customContentId for future uploads
                             if (fileInfo.activeCustomContentId) {
                                 this.contentIdCache.set(filePath, fileInfo.activeCustomContentId);
-                                this.saveCacheToStorage(); // Persist to storage
-                                console.log('💾 Cached customContentId from downloadFileInfo:', fileInfo.activeCustomContentId);
+                                this.saveCacheToStorage();
                             }
                             resolve(fileInfo);
                         } catch (error) {

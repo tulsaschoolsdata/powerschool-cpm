@@ -65,20 +65,14 @@ function activate(context) {
             return;
         }
         if (api.contentIdCache.has(remotePath)) {
-            console.log(`\u001b4be File saved: ${require('path').basename(document.fileName)} (customContentId already cached)`);
             return;
         }
         api.downloadFileInfo(remotePath)
             .then(fileInfo => {
-                if (fileInfo?.activeCustomContentId) {
-                    console.log(`✅ Pre-fetched customContentId: ${fileInfo.activeCustomContentId} for ${remotePath}`);
-                } else {
-                    console.log(`ℹ️ File ${remotePath} is new (not on PowerSchool yet)`);
-                }
+                // Pre-fetch customContentId for better publish performance
             })
             .catch(error => {
                 // File doesn't exist on PowerSchool - that's fine
-                console.log(`ℹ️ File ${remotePath} not found on PowerSchool (probably new)`);
             });
     });
 
@@ -100,7 +94,7 @@ function activate(context) {
         try {
             global.powerschoolCpmTreeView.dispose();
         } catch (error) {
-            console.warn('Error disposing previous tree view:', error.message);
+            // Silent cleanup
         }
         global.powerschoolCpmTreeView = null;
     }
@@ -141,74 +135,56 @@ function activate(context) {
         // Register file decoration provider to color file/folder labels
         const fileDecorator = vscode.window.registerFileDecorationProvider({
             provideFileDecoration(uri) {
-                // Diagnostic logging for every decoration call
                 const fileName = uri.path.split('/').pop();
-                console.log(`[DECORATOR] uri='${uri.toString()}' scheme='${uri.scheme}' path='${uri.path}' fileName='${fileName}'`);
 
                 // Always color .txt files green (should only apply to files)
                 if (fileName && fileName.endsWith('.txt')) {
-                    const result = {
-                        color: new vscode.ThemeColor('charts.green'), // green
+                    return {
+                        color: new vscode.ThemeColor('charts.green'),
                         tooltip: 'Text File'
                     };
-                    console.log(`[DECORATOR] .txt match: fileName='${fileName}', returning`, result);
-                    return result;
                 }
 
                 // For custom URI schemes (files use this)
                 if (uri.scheme === 'plugin') {
-                    const result = {
+                    return {
                         color: new vscode.ThemeColor('symbolIcon.interfaceForeground'),
                         tooltip: 'Plugin File'
                     };
-                    console.log('[DECORATOR] Returning PLUGIN decoration', result);
-                    return result;
                 } else if (uri.scheme === 'custom') {
-                    const result = {
+                    return {
                         color: new vscode.ThemeColor('symbolIcon.classForeground'),
                         tooltip: 'Custom File'
                     };
-                    console.log('[DECORATOR] Returning CUSTOM decoration', result);
-                    return result;
                 }
 
                 // For folders with file:// scheme, check the decoration map
                 if (uri.scheme === 'file' && treeProvider.folderDecorations && treeProvider.folderDecorations.size > 0) {
-                    console.log(`[DECORATOR] Checking folderDecorations for uri.path='${uri.path}' (${treeProvider.folderDecorations.size} entries)`);
                     for (const [folderPath, decorationType] of treeProvider.folderDecorations) {
                         const normalizedFolderPath = folderPath.replace(/^\/+/g, '');
                         if (uri.path.endsWith(normalizedFolderPath)) {
-                            let result;
                             if (decorationType === 'plugin') {
-                                result = {
+                                return {
                                     color: new vscode.ThemeColor('symbolIcon.interfaceForeground'),
                                     tooltip: 'Plugin Folder'
                                 };
                             } else if (decorationType === 'custom') {
-                                result = {
+                                return {
                                     color: new vscode.ThemeColor('symbolIcon.classForeground'),
                                     tooltip: 'Custom Folder'
                                 };
                             }
-                            if (result) {
-                                console.log(`[DECORATOR] FOLDER MATCH: ${folderPath} → ${decorationType}, returning`, result);
-                                return result;
-                            }
                         }
                     }
-                    console.log('[DECORATOR] No match found in folderDecorations, returning undefined');
                 }
 
-                console.log('[DECORATOR] No decoration applied, returning undefined');
                 return undefined;
             }
         });
         context.subscriptions.push(fileDecorator);
-        console.log('🎨 File decoration provider registered for custom and plugin files');
         
     } catch (error) {
-        console.error('❌ Failed to create tree view ps-vscode-cpm-explorer:', error.message);
-        vscode.window.showErrorMessage('PowerSchool CPM: Tree view registration failed. Please reload VS Code window (Cmd+Shift+P → "Developer: Reload Window").');
+        vscode.window.showErrorMessage('PowerSchool CPM: Tree view registration failed. Please reload VS Code window.');
         return;
     }
     
