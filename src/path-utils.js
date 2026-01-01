@@ -90,15 +90,14 @@ async function ensureLocalDir(localFilePath) {
     const localDir = path.dirname(localFilePath);
     if (!fs.existsSync(localDir)) {
         const createDir = await vscode.window.showWarningMessage(
-            `Directory does not exist: ${localDir}\nCreate this directory?`,
-            'Create Directory',
+            `To download and open this file, the directory structure must be created:\n${localDir}\n\nCreate directory and download file?`,
+            'Create & Download',
             'Cancel'
         );
-        if (createDir === 'Create Directory') {
+        if (createDir === 'Create & Download') {
             fs.mkdirSync(localDir, { recursive: true });
             return true;
         } else {
-            vscode.window.showInformationMessage('Operation cancelled.');
             return false;
         }
     }
