@@ -390,7 +390,12 @@ class PowerSchoolTreeProvider {
         try {
             const localFilePath = pathUtils.getLocalFilePathFromRemote(treeItem.remotePath, this.localRootPath);
 
-            await pathUtils.ensureLocalDir(localFilePath);
+            const dirCreated = await pathUtils.ensureLocalDir(localFilePath);
+            if (!dirCreated) {
+                // User cancelled - don't proceed with download
+                return { success: false, message: 'Download cancelled by user' };
+            }
+
             vscode.window.showInformationMessage(`Downloading ${treeItem.label}...`);
 
             const fileContent = await this.downloadFileContent(treeItem.remotePath);
