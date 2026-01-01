@@ -1,0 +1,30 @@
+~[if.security.inrole=58]
+[
+~[tlist_sql;
+SELECT DISTINCT
+    pd.ID AS pluginid,
+    pd.NAME AS pluginname,
+    pd.ISENABLED AS enabled,
+    SUBSTR(psmaf.pathname, 10) || '/' || pa.NAME AS filepath
+FROM PLUGINDEF pd
+JOIN PLUGINDEFASSET pda ON pd.ID = pda.PLUGINDEFID
+JOIN PSM_ASSET pa ON pda.ASSETID = pa.ID
+JOIN (
+    SELECT 
+        id, 
+        SYS_CONNECT_BY_PATH(NAME, '/') pathname
+    FROM PSM_ASSETFOLDER
+    START WITH LOWER(NAME) = 'web_root'
+    CONNECT BY PRIOR id = parentassetfolder_id
+) psmaf ON pa.ASSETFOLDER_ID = psmaf.id
+ORDER BY pd.NAME, filepath
+]
+{
+    "path": "~(filepath;json)",
+    "plugin": "~(pluginname;json)",
+    "enabled": "~(enabled;json)"
+},
+[/tlist_sql]
+{}
+]
+[/if]

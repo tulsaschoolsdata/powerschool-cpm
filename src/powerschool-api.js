@@ -433,7 +433,7 @@ class PowerSchoolAPI {
      * Uses direct HTTP access (not /ws/cpm/builtintext) to get the executed JSON.
      * Expected format: [{ "path": "/path/to/file.html", "plugin": "PluginName", "enabled": "1" }]
      */
-    async getPluginMappingsFromJson(jsonFilePath = '/admin/tps_custom/plugin_data.json') {
+    async getPluginMappingsFromJson(jsonFilePath = '/vscode_cpm/plugin_data.json') {
         try {
             const endpoint = jsonFilePath;
             const response = await this.makeRequest(endpoint);
