@@ -390,7 +390,11 @@ class PowerSchoolTreeProvider {
         try {
             const localFilePath = pathUtils.getLocalFilePathFromRemote(treeItem.remotePath, this.localRootPath);
 
-            const dirCreated = await pathUtils.ensureLocalDir(localFilePath);
+            const dirCreated = await pathUtils.ensureLocalDir(localFilePath, {
+                isCustom: treeItem.isCustom,
+                fileName: treeItem.label,
+                localRootPath: this.localRootPath
+            });
             if (!dirCreated) {
                 // User cancelled - don't proceed with download
                 return { success: false, message: 'Download cancelled by user' };
@@ -398,7 +402,7 @@ class PowerSchoolTreeProvider {
 
             vscode.window.showInformationMessage(`Downloading ${treeItem.label}...`);
 
-            const fileContent = await this.downloadFileContent(treeItem.remotePath);
+            const fileContent = await this.psApi.downloadFileContent(treeItem.remotePath);
             const fileExists = require('fs').existsSync(localFilePath);
 
             pathUtils.writeFile(localFilePath, fileContent);
@@ -424,56 +428,6 @@ class PowerSchoolTreeProvider {
             vscode.window.showErrorMessage(`Failed to download ${treeItem.label}: ${error.message}`);
             return { success: false, message: error.message };
         }
-    }
-
-    async downloadFileContent(filePath) {
-        const queryParams = new URLSearchParams({
-            LoadFolderInfo: 'false', // Keep downloads fast - cache will be populated by file save watcher
-            path: filePath
-        });
-        
-        const endpoint = '/ws/cpm/builtintext';
-        await this.psApi.ensureAuthenticated(endpoint);
-        
-        const options = {
-            hostname: new URL(this.psApi.baseUrl).hostname,
-            port: 443,
-            path: `${endpoint}?${queryParams.toString()}`,
-            method: 'GET',
-            rejectUnauthorized: false, // Accept self-signed certificates
-            headers: {
-                'Referer': `${this.psApi.baseUrl}/admin/customization/home.html`,
-                'Accept': 'application/json',
-                'User-Agent': 'ps-vscode-cpm/2.5.0',
-                'Cookie': this.psApi.getCookieHeader()
-            }
-        };
-
-        return new Promise((resolve, reject) => {
-            const req = https.request(options, (res) => {
-                let data = '';
-                res.on('data', (chunk) => {
-                    data += chunk;
-                });
-                res.on('end', () => {
-                    try {
-                        const response = JSON.parse(data);
-                        if (res.statusCode === 200) {
-                            // Note: With LoadFolderInfo='false', we don't get customContentId here
-                            // The file save watcher will cache it after the file is saved locally
-                            const content = response.activeCustomText || response.builtInText || '';
-                            resolve(content);
-                        } else {
-                            reject(new Error(`Failed to download file: ${response.message || data}`));
-                        }
-                    } catch (error) {
-                        reject(error);
-                    }
-                });
-            });
-            req.on('error', reject);
-            req.end();
-        });
     }
     
     async publishFile(treeItem) {
