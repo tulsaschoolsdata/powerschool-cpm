@@ -1,6 +1,6 @@
 
 
-// src/path-utils.js
+// modules/path-utils.js
 // Centralized path and file operation utilities for PowerSchool CPM extension
 
 const path = require('path');

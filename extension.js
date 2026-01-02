@@ -1,19 +1,19 @@
 const vscode = require('vscode');
-const { PowerSchoolAPI } = require('./src/powerschool-api');
-const { PowerSchoolTreeProvider } = require('./src/tree-provider');
+const { PowerSchoolAPI } = require('./modules/powerschool-api');
+const { PowerSchoolTreeProvider } = require('./modules/tree-provider');
 const {
     registerCommands,
     registerFileCommands,
     registerPluginCommands,
     registerSnippetCommands
-} = require('./src/commands');
-const pathUtils = require('./src/path-utils');
+} = require('./modules/commands');
+const pathUtils = require('./modules/path-utils');
 const {
     ServerInfoProvider,
     CommandsProvider,
     TemplatesProvider,
     SnippetsProvider
-} = require('./src/panel-providers');
+} = require('./modules/panel-providers');
 
 function activate(context) {
     // Get workspace folder - use the first workspace folder as root
