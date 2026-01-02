@@ -1,8 +1,8 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
-const { getTemplatesByCategory, getTemplate } = require('../templates');
-const { getSnippetsByCategory, getSnippet } = require('../code_snippets');
+const { getTemplatesByCategory, getTemplate } = require('./templates');
+const { getSnippetsByCategory, getSnippet } = require('./code_snippets');
 
 // Helper function to find first difference between two strings
 function findFirstDifference(str1, str2) {
