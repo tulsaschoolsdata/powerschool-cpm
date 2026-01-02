@@ -507,7 +507,20 @@ class PowerSchoolAPI {
                     if (res.statusCode === 200) {
                         try {
                             const result = JSON.parse(data);
-                            resolve(result.customPageContent || '');
+                            // Priority order for content:
+                            // 1. customPageContent - custom files (when using LoadFolderInfo=false)
+                            // 2. builtInText - built-in files (actual content, or "Built in file... not available" if doesn't exist)
+                            // 3. activeCustomText - customized files (or "Active custom file... not available" for non-custom)
+                            // Check builtInText first and only use it if it's not an error message
+                            let content = '';
+                            if (result.builtInText && !result.builtInText.startsWith('Built in file')) {
+                                content = result.builtInText;
+                            } else if (result.customPageContent) {
+                                content = result.customPageContent;
+                            } else if (result.activeCustomText && !result.activeCustomText.startsWith('Active custom file')) {
+                                content = result.activeCustomText;
+                            }
+                            resolve(content);
                         } catch (error) {
                             resolve(data);
                         }

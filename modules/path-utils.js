@@ -82,20 +82,52 @@ function pathsMatch(remotePath, localFilePath, pluginFilesRoot) {
 
 /**
  * Ensure the directory for a local file path exists, prompting the user if needed.
+ * Also prompts if file doesn't exist in web_root workspace.
  * Returns true if the directory exists or was created, false if cancelled.
  * @param {string} localFilePath
+ * @param {Object} options - Additional context for the prompt
+ * @param {boolean} options.isCustom - Whether this is a custom file
+ * @param {string} options.fileName - Name of the file being downloaded
+ * @param {string} options.localRootPath - Root path of the workspace
  * @returns {Promise<boolean>}
  */
-async function ensureLocalDir(localFilePath) {
+async function ensureLocalDir(localFilePath, options = {}) {
     const localDir = path.dirname(localFilePath);
-    if (!fs.existsSync(localDir)) {
+    const { isCustom, fileName, localRootPath } = options;
+    const hasWebRoot = localRootPath && localRootPath.endsWith('web_root');
+    const fileExists = fs.existsSync(localFilePath);
+    const dirExists = fs.existsSync(localDir);
+    
+    // Show prompt if directory doesn't exist OR if we're in web_root and file doesn't exist
+    const shouldPrompt = !dirExists || (hasWebRoot && !fileExists);
+    
+    if (shouldPrompt) {
+        let message = '';
+        
+        if (!dirExists) {
+            message = `To download and open this file, the directory structure must be created:\n${localDir}\n\n`;
+        } else if (hasWebRoot && !fileExists) {
+            message = `This file does not exist in your local web_root directory.\n\n`;
+        }
+        
+        if (hasWebRoot) {
+            // We're in a web_root workspace
+            const fileType = isCustom ? 'custom file' : 'built-in PowerSchool file';
+            message += `This is a ${fileType}.\n\n`;
+        }
+        
+        message += !dirExists ? 'Create directory and download file?' : 'Download file?';
+        
         const createDir = await vscode.window.showWarningMessage(
-            `To download and open this file, the directory structure must be created:\n${localDir}\n\nCreate directory and download file?`,
-            'Create & Download',
+            message,
+            !dirExists ? 'Create & Download' : 'Download',
             'Cancel'
         );
-        if (createDir === 'Create & Download') {
-            fs.mkdirSync(localDir, { recursive: true });
+        
+        if (createDir === 'Create & Download' || createDir === 'Download') {
+            if (!dirExists) {
+                fs.mkdirSync(localDir, { recursive: true });
+            }
             return true;
         } else {
             return false;
