@@ -135,6 +135,11 @@
         "icon": "$(plug)"
       },
       {
+        "command": "ps-vscode-cpm.testJsonEndpoint",
+        "title": "ps-vscode-cpm: Test JSON Endpoint",
+        "icon": "$(json)"
+      },
+      {
         "command": "ps-vscode-cpm.setupWebRoot",
         "title": "ps-vscode-cpm: Setup Plugin Web Root Directory"
       },
