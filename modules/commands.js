@@ -150,6 +150,47 @@ function registerCommands(context, api, treeProvider) {
             vscode.window.showErrorMessage(`❌ Connection test failed: ${error.message}`);
         }
     }));
+
+    // Test JSON endpoint command
+    commands.push(registerCommandSafely('ps-vscode-cpm.testJsonEndpoint', async () => {
+        try {
+            const jsonFiles = [
+                '/admin/reports/registration/js/elem_reg.json',
+                '/admin/reports/registration/js/dist_reg.json',
+                '/admin/reports/registration/js/num_teachers.json',
+                '/admin/reports/registration/js/school_cat_reg.json'
+            ];
+            
+            vscode.window.showInformationMessage(`Testing ${jsonFiles.length} JSON files...`);
+            
+            let results = `📊 JSON Files Test Results:\n\n`;
+            
+            for (const jsonPath of jsonFiles) {
+                try {
+                    const response = await api.makeRequest(jsonPath);
+                    const fileName = jsonPath.split('/').pop();
+                    
+                    if (response.statusCode === 200) {
+                        const dataLength = typeof response.data === 'string' ? response.data.length : JSON.stringify(response.data).length;
+                        results += `✅ ${fileName}: ${response.statusCode} (${dataLength} bytes)\n`;
+                    } else {
+                        results += `❌ ${fileName}: ${response.statusCode}\n`;
+                    }
+                } catch (error) {
+                    const fileName = jsonPath.split('/').pop();
+                    results += `❌ ${fileName}: ${error.message}\n`;
+                }
+            }
+            
+            results += `\n💡 These files exist on the server but are not returned by the /ws/cpm/tree API.\n`;
+            results += `They may need to be accessed directly or are filtered by PowerSchool.`;
+            
+            vscode.window.showInformationMessage(results);
+            
+        } catch (error) {
+            vscode.window.showErrorMessage(`❌ JSON endpoint test failed: ${error.message}`);
+        }
+    }));
     
     // Download file command
     commands.push(registerCommandSafely('ps-vscode-cpm.downloadFile', async (treeItem) => {

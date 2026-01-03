@@ -260,6 +260,16 @@ class PowerSchoolTreeProvider {
 
         // Load plugin mappings if not already loaded (now just initializes empty maps)
         await this.loadPluginMappings();
+        
+        // Known files that exist but aren't returned by the tree API
+        const hiddenFiles = {
+            '/admin/reports/registration/js': [
+                'elem_reg.json',
+                'dist_reg.json', 
+                'num_teachers.json',
+                'school_cat_reg.json'
+            ]
+        };
 
         // Sort subfolders alphabetically and add to items
         if (folderData.subFolders) {
@@ -357,6 +367,54 @@ class PowerSchoolTreeProvider {
                     item.pluginName = pluginInfo.pluginName;
                     item.pluginEnabled = pluginInfo.enabled;
                 }
+                
+                items.push(item);
+            }
+        }
+        
+        // Add hidden files that aren't returned by the tree API
+        if (hiddenFiles[currentPath]) {
+            for (const fileName of hiddenFiles[currentPath]) {
+                const filePath = `${currentPath}/${fileName}`;
+                const normalizedPath = this.normalizePath(filePath);
+                
+                // Check if file already exists in items (shouldn't happen, but safety check)
+                const alreadyExists = items.some(item => item.remotePath === filePath);
+                if (alreadyExists) continue;
+                
+                // Check plugin mappings
+                const pluginInfo = this.pluginMappings?.get(normalizedPath);
+                const isCustom = pluginInfo ? pluginInfo.isCustom : true; // Assume custom if not in mappings
+                
+                if (isCustom) {
+                    hasCustomFiles = true;
+                }
+                
+                if (!this.localRootPath) {
+                    console.error('[TREE] ❌ localRootPath is null/undefined, cannot create file URI');
+                    continue;
+                }
+                
+                const fileUri = vscode.Uri.file(path.join(this.localRootPath, filePath.replace(/^\/+/g, '')));
+                const item = new PowerSchoolTreeItem(
+                    fileName,
+                    vscode.TreeItemCollapsibleState.None,
+                    fileUri,
+                    'file',
+                    filePath,
+                    this.psApi,
+                    this.localRootPath,
+                    isCustom
+                );
+                
+                // Set plugin metadata if available
+                if (pluginInfo) {
+                    item.pluginName = pluginInfo.pluginName;
+                    item.pluginEnabled = pluginInfo.enabled;
+                }
+                
+                // Add tooltip indicating this is a manually-added file
+                item.tooltip = `${fileName} (Custom - Not visible in CPM tree API)\nClick to download from PowerSchool`;
                 
                 items.push(item);
             }
