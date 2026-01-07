@@ -445,47 +445,74 @@ class PowerSchoolTreeProvider {
     }
     
     async downloadFile(treeItem) {
-        try {
-            const localFilePath = pathUtils.getLocalFilePathFromRemote(treeItem.remotePath, this.localRootPath);
+        const localFilePath = pathUtils.getLocalFilePathFromRemote(treeItem.remotePath, this.localRootPath);
+        const fileExists = require('fs').existsSync(localFilePath);
+        const remoteUri = vscode.Uri.parse(`powerschool:${treeItem.remotePath}`);
+        // Open virtual document
+        const document = await vscode.workspace.openTextDocument(remoteUri);
+        await vscode.window.showTextDocument(document, { preview: false });
 
-            const dirCreated = await pathUtils.ensureLocalDir(localFilePath, {
-                isCustom: treeItem.isCustom,
-                fileName: treeItem.label,
-                localRootPath: this.localRootPath
-            });
-            if (!dirCreated) {
-                // User cancelled - don't proceed with download
-                return { success: false, message: 'Download cancelled by user' };
-            }
-
-            vscode.window.showInformationMessage(`Downloading ${treeItem.label}...`);
-
-            const fileContent = await this.psApi.downloadFileContent(treeItem.remotePath);
-            const fileExists = require('fs').existsSync(localFilePath);
-
-            pathUtils.writeFile(localFilePath, fileContent);
-
-            const relativeLocalPath = path.relative(this.localRootPath, localFilePath);
-            vscode.window.showInformationMessage(
-                `${fileExists ? 'Updated' : 'Downloaded'} ${treeItem.label} to ${relativeLocalPath}`
+        if (!fileExists) {
+            // Show notification for read-only preview, offer Save/Cancel
+            const choice = await vscode.window.showInformationMessage(
+                'This is a read-only version. The file and file structure will have to be created.',
+                'Save', 'Cancel'
             );
-
-            this._onDidChangeTreeData.fire(treeItem);
-
-            const document = await vscode.workspace.openTextDocument(localFilePath);
-            await vscode.window.showTextDocument(document);
-
-            // Immediately cache customContentId after download (for fast publish)
-            try {
-                await this.psApi.downloadFileInfo(treeItem.remotePath);
-            } catch (err) {
-                // Silent - not critical
+            if (choice === 'Save') {
+                // Save file to disk, create directories if needed
+                const content = document.getText();
+                const localDir = require('path').dirname(localFilePath);
+                if (!require('fs').existsSync(localDir)) {
+                    require('fs').mkdirSync(localDir, { recursive: true });
+                }
+                require('fs').writeFileSync(localFilePath, content, 'utf8');
+                vscode.window.showInformationMessage(`File saved to ${localFilePath}`);
+                this._onDidChangeTreeData.fire(treeItem);
             }
-            return { success: true };
-        } catch (error) {
-            vscode.window.showErrorMessage(`Failed to download ${treeItem.label}: ${error.message}`);
-            return { success: false, message: error.message };
+        } else {
+            // File exists locally, warn about overwrite and offer Compare/Close
+            let afterCompare = false;
+            let done = false;
+            while (!done) {
+                let buttons;
+                if (!afterCompare) {
+                    buttons = ['Save', 'Compare', 'Close'];
+                } else {
+                    buttons = ['Save', 'Close'];
+                }
+                const choice = await vscode.window.showWarningMessage(
+                    'Saving this file will overwrite the existing file.',
+                    { modal: true },
+                    ...buttons
+                );
+                if (choice === 'Save') {
+                    const content = document.getText();
+                    require('fs').writeFileSync(localFilePath, content, 'utf8');
+                    vscode.window.showInformationMessage(`File overwritten at ${localFilePath}`);
+                    this._onDidChangeTreeData.fire(treeItem);
+                    done = true;
+                } else if (choice === 'Compare' && !afterCompare) {
+                    await vscode.commands.executeCommand(
+                        'vscode.diff',
+                        vscode.Uri.file(localFilePath),
+                        remoteUri,
+                        `${treeItem.label}: Local ↔ Remote`
+                    );
+                    afterCompare = true;
+                } else if (choice === 'Close' || choice === undefined) {
+                    // Close the virtual file from the editor
+                    const openEditors = vscode.window.visibleTextEditors;
+                    for (const editor of openEditors) {
+                        if (editor.document.uri.toString() === remoteUri.toString()) {
+                            await vscode.window.showTextDocument(editor.document, { preview: false });
+                            await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+                        }
+                    }
+                    done = true;
+                }
+            }
         }
+        return { success: true };
     }
     
     async publishFile(treeItem) {
