@@ -120,6 +120,7 @@ async function ensureLocalDir(localFilePath, options = {}) {
         
         const createDir = await vscode.window.showWarningMessage(
             message,
+            { modal: true },
             !dirExists ? 'Create & Download' : 'Download',
             'Cancel'
         );
