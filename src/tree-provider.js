@@ -349,6 +349,13 @@ class PowerSchoolTreeProvider {
     async downloadFile(treeItem) {
         try {
             const localFilePath = pathUtils.getLocalFilePathFromRemote(treeItem.remotePath, this.localRootPath);
+            const relativeLocalPath = path.relative(this.localRootPath, localFilePath);
+            const warningMsg = `This will create the following file and folders on your local system:\n${relativeLocalPath}\n\nContinue?`;
+            const confirm = await vscode.window.showWarningMessage(warningMsg, { modal: true }, 'Yes');
+            if (confirm !== 'Yes') {
+                return { success: false, message: 'User cancelled download.' };
+            }
+
             console.log(`📥 Downloading: ${treeItem.remotePath}`);
             console.log(`   Plugin files root: ${this.localRootPath}`);
             console.log(`   Target file path: ${localFilePath}`);
@@ -363,7 +370,6 @@ class PowerSchoolTreeProvider {
             pathUtils.writeFile(localFilePath, fileContent);
 
             console.log(`✅ Downloaded: ${treeItem.remotePath}`);
-            const relativeLocalPath = path.relative(this.localRootPath, localFilePath);
             vscode.window.showInformationMessage(
                 `${fileExists ? 'Updated' : 'Downloaded'} ${treeItem.label} to ${relativeLocalPath}`
             );
@@ -390,19 +396,17 @@ class PowerSchoolTreeProvider {
 
     async downloadFileContent(filePath) {
         const queryParams = new URLSearchParams({
-            LoadFolderInfo: 'false', // Keep downloads fast - cache will be populated by file save watcher
+            LoadFolderInfo: 'false',
             path: filePath
         });
-        
         const endpoint = '/ws/cpm/builtintext';
         await this.psApi.ensureAuthenticated(endpoint);
-        
         const options = {
             hostname: new URL(this.psApi.baseUrl).hostname,
             port: 443,
             path: `${endpoint}?${queryParams.toString()}`,
             method: 'GET',
-            rejectUnauthorized: false, // Accept self-signed certificates
+            rejectUnauthorized: false,
             headers: {
                 'Referer': `${this.psApi.baseUrl}/admin/customization/home.html`,
                 'Accept': 'application/json',
@@ -421,10 +425,19 @@ class PowerSchoolTreeProvider {
                     try {
                         const response = JSON.parse(data);
                         if (res.statusCode === 200) {
-                            // Note: With LoadFolderInfo='false', we don't get customContentId here
-                            // The file save watcher will cache it after the file is saved locally
-                            const content = response.activeCustomText || response.builtInText || '';
-                            resolve(content);
+                            // Prefer real content, avoid saving 'not available' message
+                            const notAvailableMsg = 'Active custom file';
+                            let content = '';
+                            if (response.activeCustomText && !response.activeCustomText.startsWith(notAvailableMsg)) {
+                                content = response.activeCustomText;
+                            } else if (response.builtInText && !response.builtInText.startsWith(notAvailableMsg)) {
+                                content = response.builtInText;
+                            }
+                            if (!content) {
+                                reject(new Error('File is not available as a custom or stock file on the server.'));
+                            } else {
+                                resolve(content);
+                            }
                         } else {
                             reject(new Error(`Failed to download file: ${response.message || data}`));
                         }
