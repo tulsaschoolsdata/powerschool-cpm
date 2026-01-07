@@ -2,7 +2,7 @@
   "name": "ps-vscode-cpm",
   "displayName": "ps-vscode-cpm",
   "description": "Manage custom pages in PowerSchool",
-  "version": "3.0.1",
+  "version": "4.1.1",
   "publisher": "zuvy",
   "engines": {
     "vscode": "^1.104.0"
@@ -133,6 +133,11 @@
         "command": "ps-vscode-cpm.testConnection",
         "title": "ps-vscode-cpm: Test OAuth Connection",
         "icon": "$(plug)"
+      },
+      {
+        "command": "ps-vscode-cpm.testJsonEndpoint",
+        "title": "ps-vscode-cpm: Test JSON Endpoint",
+        "icon": "$(json)"
       },
       {
         "command": "ps-vscode-cpm.setupWebRoot",

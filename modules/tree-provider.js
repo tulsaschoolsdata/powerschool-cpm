@@ -4,7 +4,7 @@ const pathUtils = require('./path-utils');
 const path = require('path');
 
 class PowerSchoolTreeItem extends vscode.TreeItem {
-    constructor(label, collapsibleState, resourceUri, contextValue, remotePath, psApi, localRootPath, isCustom = false, pluginInfo = null, hasPluginInfo = false, hasCustomFiles = false) {
+    constructor(label, collapsibleState, resourceUri, contextValue, remotePath, psApi, localRootPath, isCustom = false, hasCustomFiles = false) {
         super(label, collapsibleState);
         this.resourceUri = resourceUri;
         this.contextValue = contextValue;
@@ -12,14 +12,14 @@ class PowerSchoolTreeItem extends vscode.TreeItem {
         this.psApi = psApi;
         this.localRootPath = localRootPath;
         this.isCustom = isCustom;
-        this.pluginInfo = pluginInfo;  // { pluginId, pluginName, enabled }
-        this.hasPluginInfo = hasPluginInfo; // Whether this item has plugin info (direct or inherited)
         this.hasCustomFiles = hasCustomFiles; // Whether this folder contains any custom files
+        
+        // Plugin metadata (set from JSON mappings if available)
+        this.pluginName = undefined;
+        this.pluginEnabled = undefined;
 
-        // Update contextValue to include custom and plugin status
-        if (isCustom && pluginInfo) {
-            this.contextValue = contextValue === 'file' ? 'file-custom-plugin' : 'folder-custom-plugin';
-        } else if (isCustom) {
+        // Update contextValue to include custom status
+        if (isCustom) {
             this.contextValue = contextValue === 'file' ? 'file-custom' : 'folder-custom';
         }
 
@@ -30,11 +30,8 @@ class PowerSchoolTreeItem extends vscode.TreeItem {
                 arguments: [this]
             };
             this.iconPath = this.getFileIcon();
-            
-            // Override resourceUri for FILES to enable colored icons
-            if (isCustom && pluginInfo) {
-                this.resourceUri = vscode.Uri.parse(`plugin:${label}`);
-            } else if (isCustom) {
+            // Use custom URI scheme for resource decoration
+            if (isCustom) {
                 this.resourceUri = vscode.Uri.parse(`custom:${label}`);
             }
         } else {
@@ -43,16 +40,15 @@ class PowerSchoolTreeItem extends vscode.TreeItem {
             // Don't override resourceUri - it's already set from the constructor parameter
         }
 
-        // Enhanced tooltip with custom status and plugin info
+        // Enhanced tooltip with custom status
         let customStatus = '';
-        let descriptionText = '';
-        if (isCustom && pluginInfo) {
-            const enabledStatus = pluginInfo.enabled ? '' : ' (Disabled)';
-            customStatus = ` (Plugin: ${pluginInfo.pluginName}${enabledStatus})`;
-            descriptionText = `● ${pluginInfo.pluginName}`;
-        } else if (isCustom) {
-            customStatus = ' (Custom - No Plugin)';
-            descriptionText = '● custom';
+        if (isCustom) {
+            if (this.pluginName) {
+                const enabledStatus = this.pluginEnabled === false ? ' - Disabled' : '';
+                customStatus = ` (Plugin: ${this.pluginName}${enabledStatus})`;
+            } else {
+                customStatus = ' (Custom)';
+            }
         } else {
             customStatus = ' (Original PowerSchool)';
         }
@@ -62,29 +58,24 @@ class PowerSchoolTreeItem extends vscode.TreeItem {
             `${label}${customStatus}`;
         
         // Don't set description for folders - keep folder names clean
-        // Plugin info will only show in tooltip on hover
     }
     
     getFileIcon() {
+        // Safety check for null remotePath
+        if (!this.remotePath) {
+            console.warn('[TREE] Warning: TreeItem has null remotePath, using default icon');
+            return new vscode.ThemeIcon('file');
+        }
+        
         const localPath = pathUtils.getLocalFilePathFromRemote(this.remotePath, this.localRootPath);
         const exists = require('fs').existsSync(localPath);
-        // Plugin-controlled custom files get purple/magenta color
-        if (this.isCustom && this.pluginInfo) {
+        // Custom files get blue/orange color
+        if (this.isCustom) {
             if (exists) {
-                // Plugin file, downloaded locally - purple
-                return new vscode.ThemeIcon('file', new vscode.ThemeColor('symbolIcon.interfaceForeground'));
-            } else {
-                // Plugin file, not downloaded - magenta
-                return new vscode.ThemeIcon('file', new vscode.ThemeColor('editorInfo.foreground'));
-            }
-        }
-        // Non-plugin custom files get blue/orange color
-        else if (this.isCustom) {
-            if (exists) {
-                // Custom file (no plugin), downloaded locally - blue
+                // Custom file, downloaded locally - blue
                 return new vscode.ThemeIcon('file', new vscode.ThemeColor('symbolIcon.classForeground'));
             } else {
-                // Custom file (no plugin), not downloaded - orange
+                // Custom file, not downloaded - orange
                 return new vscode.ThemeIcon('file', new vscode.ThemeColor('editorWarning.foreground'));
             }
         } else {
@@ -101,11 +92,7 @@ class PowerSchoolTreeItem extends vscode.TreeItem {
         const path = require('path');
         const extensionPath = path.dirname(path.dirname(__filename));
         
-        // Plugin folders - purple icon
-        if (this.isCustom && this.pluginInfo) {
-            return path.join(extensionPath, 'resources', 'icons', 'folder-plugin.svg');
-        }
-        // Stock folders with any custom files (plugin or not) - orange icon
+        // Folders with custom files - orange icon
         if (this.hasCustomFiles) {
             return path.join(extensionPath, 'resources', 'icons', 'folder-custom.svg');
         }
@@ -117,8 +104,8 @@ class PowerSchoolTreeItem extends vscode.TreeItem {
 class PowerSchoolTreeProvider {
     constructor(psApi, localRootPath) {
         this.psApi = psApi;
-        // Always resolve localRootPath using pathUtils.getPluginFilesRoot
-        this.localRootPath = pathUtils.getPluginFilesRoot(localRootPath);
+        // Use provided localRootPath, or fall back to getPluginFilesRoot if null
+        this.localRootPath = localRootPath || pathUtils.getPluginFilesRoot();
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
         this.treeCache = new Map();
@@ -128,8 +115,7 @@ class PowerSchoolTreeProvider {
         this.folderDecorations = new Map();  // Track folder decoration types by path
     }
         setLocalRootPath(newRootPath) {
-            // Always resolve using pathUtils.getPluginFilesRoot
-            this.localRootPath = pathUtils.getPluginFilesRoot(newRootPath);
+            this.localRootPath = newRootPath;
             this.refresh();
         }
     
@@ -142,54 +128,48 @@ class PowerSchoolTreeProvider {
         this._onDidChangeTreeData.fire();
     }
     
+    /**
+     * Normalize a file path for consistent lookup in plugin mappings
+     */
+    normalizePath(filePath) {
+        // Remove leading slashes and normalize separators
+        return filePath.replace(/^\/+/, '/').replace(/\\/g, '/');
+    }
+    
     async loadPluginMappings() {
         if (this.pluginMappingsLoaded) {
             return this.pluginMappings;
         }
         
+        // Try to load from server-generated JSON file
         try {
-            const mappings = await this.psApi.getPluginFileMappings();
-            this.pluginMappings = new Map();
-            this.pluginFilePaths = new Set();  // Track actual file paths
+            const pluginData = await this.psApi.getPluginMappingsFromJson();
             
-            // Build a map of file path to plugin info
-            for (const mapping of mappings) {
-                if (mapping.cpmpath && mapping.filename && mapping.pluginname) {
-                    const fullPath = `${mapping.cpmpath}/${mapping.filename}`.toLowerCase();
-                    const folderPath = mapping.cpmpath.toLowerCase();
-                    
-                    // Store plugin info for files
-                    this.pluginMappings.set(fullPath, {
-                        pluginId: mapping.pluginid,
-                        pluginName: mapping.pluginname,
-                        enabled: mapping.enabled === 'true' || mapping.enabled === true
+            if (pluginData) {
+                // Convert to Map format
+                this.pluginMappings = new Map();
+                this.pluginFilePaths = new Set();
+                
+                for (const [filePath, info] of Object.entries(pluginData)) {
+                    const normalizedPath = this.normalizePath(filePath);
+                    this.pluginMappings.set(normalizedPath, {
+                        pluginName: info.plugin || info.pluginName || 'Unknown',
+                        enabled: info.enabled !== false,
+                        isCustom: true
                     });
-                    
-                    // Track that this is an actual file path (not folder)
-                    this.pluginFilePaths.add(fullPath);
-                    
-                    // Mark folder as plugin folder in decorations
-                    this.folderDecorations.set(folderPath, 'plugin');
+                    this.pluginFilePaths.add(normalizedPath);
                 }
+            } else {
+                this.pluginMappings = new Map();
+                this.pluginFilePaths = new Set();
             }
-            
-            this.pluginMappingsLoaded = true;
-            return this.pluginMappings;
         } catch (error) {
-            this.pluginMappingsLoaded = true; // Don't keep retrying on error
             this.pluginMappings = new Map();
             this.pluginFilePaths = new Set();
-            return this.pluginMappings;
-        }
-    }
-    
-    getPluginInfoForPath(remotePath) {
-        if (!this.pluginMappings) {
-            return null;
         }
         
-        const normalizedPath = remotePath.toLowerCase();
-        return this.pluginMappings.get(normalizedPath) || null;
+        this.pluginMappingsLoaded = true;
+        return this.pluginMappings;
     }
     
     async getTreeItem(element) {
@@ -203,6 +183,31 @@ class PowerSchoolTreeProvider {
                 this.psApi.initialize();
             } catch (error) {
                 vscode.window.showErrorMessage(error.message);
+                return [];
+            }
+        }
+        
+        // Ensure localRootPath is set
+        if (!this.localRootPath) {
+            this.localRootPath = pathUtils.getPluginFilesRoot();
+            if (!this.localRootPath) {
+                console.error('[TREE] ❌ Cannot determine local root path - no workspace folder open');
+                // Show helpful message to user
+                const workspaceFolders = vscode.workspace.workspaceFolders;
+                if (!workspaceFolders || workspaceFolders.length === 0) {
+                    // Only show this message once
+                    if (!this._shownNoWorkspaceWarning) {
+                        this._shownNoWorkspaceWarning = true;
+                        vscode.window.showWarningMessage(
+                            'PowerSchool CPM: Please open a workspace folder to use the file tree.',
+                            'Open Folder'
+                        ).then(selection => {
+                            if (selection === 'Open Folder') {
+                                vscode.commands.executeCommand('vscode.openFolder');
+                            }
+                        });
+                    }
+                }
                 return [];
             }
         }
@@ -232,7 +237,7 @@ class PowerSchoolTreeProvider {
             
             if (folderData.folder) {
                 // Create tree items for subfolders and files
-                const treeItems = await this.createTreeItems(folderData.folder, folderPath, null);
+                const treeItems = await this.createTreeItems(folderData.folder, folderPath);
                 children.push(...treeItems);
             }
             
@@ -241,38 +246,60 @@ class PowerSchoolTreeProvider {
             return children;
             
         } catch (error) {
+            console.error('[TREE] ❌ Error loading folder', folderPath, ':', error.message);
+            console.error('[TREE] 🔍 Full error:', error);
+            console.error('[TREE] 🔍 Stack trace:', error.stack);
             vscode.window.showErrorMessage(`Failed to load folder ${folderPath}: ${error.message}`);
             return [];
         }
     }
     
-    async createTreeItems(folderData, currentPath, parentPluginInfo = null) {
+    async createTreeItems(folderData, currentPath) {
         const items = [];
         let hasCustomFiles = false;
 
-        // Load plugin mappings if not already loaded
-        const pluginMappings = await this.loadPluginMappings();
-        const normalizedCurrentPath = currentPath.toLowerCase();
+        // Load plugin mappings if not already loaded (now just initializes empty maps)
+        await this.loadPluginMappings();
+        
+        // Known files that exist but aren't returned by the tree API
+        const hiddenFiles = {
+            '/admin/reports/registration/js': [
+                'elem_reg.json',
+                'dist_reg.json', 
+                'num_teachers.json',
+                'school_cat_reg.json'
+            ]
+        };
 
         // Sort subfolders alphabetically and add to items
         if (folderData.subFolders) {
-            const sortedSubfolders = [...folderData.subFolders].sort((a, b) =>
+            // Filter out null/undefined items before sorting
+            const validSubfolders = folderData.subFolders.filter(subfolder => {
+                if (!subfolder || !subfolder.text) {
+                    console.warn('[TREE] ⚠️ Skipping subfolder with null/undefined name in', currentPath);
+                    return false;
+                }
+                return true;
+            });
+            
+            const sortedSubfolders = validSubfolders.sort((a, b) =>
                 a.text.toLowerCase().localeCompare(b.text.toLowerCase())
             );
 
             for (const subfolder of sortedSubfolders) {
+                
                 const folderPath = currentPath === '/' ? `/${subfolder.text}` : `${currentPath}/${subfolder.text}`;
-                const normalizedPath = folderPath.toLowerCase();
-                // Only use plugin info for CUSTOM items
-                let effectivePluginInfo = null;
-                if (subfolder.custom) {
-                    const directPluginInfo = pluginMappings.get(normalizedPath) || null;
-                    effectivePluginInfo = directPluginInfo || parentPluginInfo;
-                }
                 // Recursively get subfolder items and check if any are custom
-                const subfolderTree = await this.createTreeItems(subfolder, folderPath, effectivePluginInfo);
+                const subfolderTree = await this.createTreeItems(subfolder, folderPath);
                 const subfolderHasCustom = subfolderTree.some(child => child.isCustom || child.hasCustomFiles);
                 if (subfolderHasCustom) hasCustomFiles = true;
+                
+                // Safety check for localRootPath
+                if (!this.localRootPath) {
+                    console.error('[TREE] ❌ localRootPath is null/undefined, cannot create folder URI');
+                    continue;
+                }
+                
                 const folderUri = vscode.Uri.file(path.join(this.localRootPath, folderPath.replace(/^\/+/g, '')));
                 const item = new PowerSchoolTreeItem(
                     subfolder.text,
@@ -283,8 +310,6 @@ class PowerSchoolTreeProvider {
                     this.psApi,
                     this.localRootPath,
                     subfolder.custom,
-                    effectivePluginInfo,
-                    effectivePluginInfo !== null,
                     subfolderHasCustom
                 );
                 items.push(item);
@@ -293,31 +318,104 @@ class PowerSchoolTreeProvider {
 
         // Sort pages alphabetically and add to items
         if (folderData.pages) {
-            const sortedPages = [...folderData.pages].sort((a, b) =>
+            // Filter out null/undefined items before sorting
+            const validPages = folderData.pages.filter(page => {
+                if (!page || !page.text) {
+                    console.warn('[TREE] ⚠️ Skipping file with null/undefined name in', currentPath);
+                    return false;
+                }
+                return true;
+            });
+            
+            const sortedPages = validPages.sort((a, b) =>
                 a.text.toLowerCase().localeCompare(b.text.toLowerCase())
             );
 
             for (const page of sortedPages) {
                 const filePath = currentPath === '/' ? `/${page.text}` : `${currentPath}/${page.text}`;
-                const normalizedPath = filePath.toLowerCase();
-                let effectivePluginInfo = null;
-                if (page.custom) {
-                    const directPluginInfo = pluginMappings.get(normalizedPath) || null;
-                    effectivePluginInfo = directPluginInfo || parentPluginInfo;
+                
+                const normalizedPath = this.normalizePath(filePath);
+                
+                // Check plugin mappings first, then fall back to page.custom flag
+                const pluginInfo = this.pluginMappings?.get(normalizedPath);
+                const isCustom = page.custom === true || (pluginInfo && pluginInfo.isCustom);
+                
+                if (isCustom) {
                     hasCustomFiles = true;
                 }
+                
+                // Safety check for localRootPath
+                if (!this.localRootPath) {
+                    console.error('[TREE] ❌ localRootPath is null/undefined, cannot create file URI');
+                    continue;
+                }
+                
+                const fileUri = vscode.Uri.file(path.join(this.localRootPath, filePath.replace(/^\/+/g, '')));
                 const item = new PowerSchoolTreeItem(
                     page.text,
                     vscode.TreeItemCollapsibleState.None,
-                    null,
+                    fileUri,
                     'file',
                     filePath,
                     this.psApi,
                     this.localRootPath,
-                    page.custom,
-                    effectivePluginInfo,
-                    effectivePluginInfo !== null
+                    isCustom
                 );
+                
+                // Set plugin metadata if available from JSON mappings
+                if (pluginInfo) {
+                    item.pluginName = pluginInfo.pluginName;
+                    item.pluginEnabled = pluginInfo.enabled;
+                }
+                
+                items.push(item);
+            }
+        }
+        
+        // Add hidden files that aren't returned by the tree API
+        if (hiddenFiles[currentPath]) {
+            for (const fileName of hiddenFiles[currentPath]) {
+                const filePath = `${currentPath}/${fileName}`;
+                const normalizedPath = this.normalizePath(filePath);
+                
+                // Check if file already exists in items (shouldn't happen, but safety check)
+                const alreadyExists = items.some(item => item.remotePath === filePath);
+                if (alreadyExists) continue;
+                
+                // Check plugin mappings
+                const pluginInfo = this.pluginMappings?.get(normalizedPath);
+                const isCustom = pluginInfo ? pluginInfo.isCustom : true; // Assume custom if not in mappings
+                
+                if (isCustom) {
+                    hasCustomFiles = true;
+                }
+                
+                if (!this.localRootPath) {
+                    console.error('[TREE] ❌ localRootPath is null/undefined, cannot create file URI');
+                    continue;
+                }
+                
+                const fileUri = vscode.Uri.file(path.join(this.localRootPath, filePath.replace(/^\/+/g, '')));
+                const item = new PowerSchoolTreeItem(
+                    fileName,
+                    vscode.TreeItemCollapsibleState.None,
+                    fileUri,
+                    'file',
+                    filePath,
+                    this.psApi,
+                    this.localRootPath,
+                    isCustom
+                );
+                
+                // Set plugin metadata if available
+                if (pluginInfo) {
+                    item.pluginName = pluginInfo.pluginName;
+                    item.pluginEnabled = pluginInfo.enabled;
+                }
+                
+                // Add tooltip indicating this is a manually-added file
+                item.tooltip = `${fileName} (Custom - Not visible in CPM tree API)\nClick to download from PowerSchool`;
+                
                 items.push(item);
             }
         }
@@ -341,14 +439,15 @@ class PowerSchoolTreeProvider {
     }
     
     isCustomFile(filePath) {
-        // For now, just check plugin mappings
-        // Could be extended to check other custom file indicators
-        return this.getPluginInfoForPath(filePath) !== null;
+        // Custom file status is now determined from tree data (page.custom flag)
+        // This method kept for compatibility but not actively used
+        return false;
     }
     
     async downloadFile(treeItem) {
         try {
             const localFilePath = pathUtils.getLocalFilePathFromRemote(treeItem.remotePath, this.localRootPath);
+<<<<<<< HEAD:src/tree-provider.js
             const relativeLocalPath = path.relative(this.localRootPath, localFilePath);
             const warningMsg = `This will create the following file and folders on your local system:\n${relativeLocalPath}\n\nContinue?`;
             const confirm = await vscode.window.showWarningMessage(warningMsg, { modal: true }, 'Yes');
@@ -359,17 +458,31 @@ class PowerSchoolTreeProvider {
             console.log(`📥 Downloading: ${treeItem.remotePath}`);
             console.log(`   Plugin files root: ${this.localRootPath}`);
             console.log(`   Target file path: ${localFilePath}`);
+=======
+>>>>>>> 25f6429057aac1ebbaf1ce01ec19e31c5958fbff:modules/tree-provider.js
 
-            await pathUtils.ensureLocalDir(localFilePath);
+            const dirCreated = await pathUtils.ensureLocalDir(localFilePath, {
+                isCustom: treeItem.isCustom,
+                fileName: treeItem.label,
+                localRootPath: this.localRootPath
+            });
+            if (!dirCreated) {
+                // User cancelled - don't proceed with download
+                return { success: false, message: 'Download cancelled by user' };
+            }
+
             vscode.window.showInformationMessage(`Downloading ${treeItem.label}...`);
 
-            const fileContent = await this.downloadFileContent(treeItem.remotePath);
+            const fileContent = await this.psApi.downloadFileContent(treeItem.remotePath);
             const fileExists = require('fs').existsSync(localFilePath);
-            console.log(`   File ${fileExists ? 'EXISTS' : 'NEW'}: ${localFilePath}`);
 
             pathUtils.writeFile(localFilePath, fileContent);
 
+<<<<<<< HEAD:src/tree-provider.js
             console.log(`✅ Downloaded: ${treeItem.remotePath}`);
+=======
+            const relativeLocalPath = path.relative(this.localRootPath, localFilePath);
+>>>>>>> 25f6429057aac1ebbaf1ce01ec19e31c5958fbff:modules/tree-provider.js
             vscode.window.showInformationMessage(
                 `${fileExists ? 'Updated' : 'Downloaded'} ${treeItem.label} to ${relativeLocalPath}`
             );
@@ -382,17 +495,16 @@ class PowerSchoolTreeProvider {
             // Immediately cache customContentId after download (for fast publish)
             try {
                 await this.psApi.downloadFileInfo(treeItem.remotePath);
-                console.log(`💾 Cached customContentId for ${treeItem.remotePath} after download`);
             } catch (err) {
-                console.warn(`⚠️ Could not cache customContentId for ${treeItem.remotePath} after download:`, err.message);
+                // Silent - not critical
             }
             return { success: true };
         } catch (error) {
-            console.error(`❌ Failed to download ${treeItem.remotePath}:`, error);
             vscode.window.showErrorMessage(`Failed to download ${treeItem.label}: ${error.message}`);
             return { success: false, message: error.message };
         }
     }
+<<<<<<< HEAD:src/tree-provider.js
 
     async downloadFileContent(filePath) {
         const queryParams = new URLSearchParams({
@@ -450,17 +562,14 @@ class PowerSchoolTreeProvider {
             req.end();
         });
     }
+=======
+>>>>>>> 25f6429057aac1ebbaf1ce01ec19e31c5958fbff:modules/tree-provider.js
     
     async publishFile(treeItem) {
-        console.log('📤 publishFile called with treeItem:', treeItem ? treeItem.label : 'null');
-
         if (!treeItem || treeItem.contextValue !== 'file') {
-            console.log('❌ Invalid file selected - contextValue:', treeItem ? treeItem.contextValue : 'null');
             vscode.window.showErrorMessage('Invalid file selected.');
             return;
         }
-
-        console.log('📤 Publishing file:', treeItem.label, 'remotePath:', treeItem.remotePath);
 
         try {
             if (!this.localRootPath) {
@@ -482,7 +591,6 @@ class PowerSchoolTreeProvider {
             // Upload file (this method handles both create and update internally)
             const result = await this.psApi.uploadFileContent(treeItem.remotePath, content);
 
-            console.log('✅ Upload complete, result:', result);
             vscode.window.showInformationMessage(`✅ Published ${treeItem.label} successfully!`);
 
         } catch (error) {
@@ -491,17 +599,13 @@ class PowerSchoolTreeProvider {
     }
     
     async publishCurrentFile() {
-        console.log('📤 publishCurrentFile called');
-
         const activeEditor = vscode.window.activeTextEditor;
         if (!activeEditor) {
-            console.log('❌ No active editor');
             vscode.window.showWarningMessage('No active file to publish.');
             return;
         }
 
         if (!this.localRootPath) {
-            console.log('❌ No localRootPath set on tree provider');
             vscode.window.showErrorMessage('No workspace folder is open.');
             return;
         }
