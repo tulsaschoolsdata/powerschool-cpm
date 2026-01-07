@@ -447,19 +447,6 @@ class PowerSchoolTreeProvider {
     async downloadFile(treeItem) {
         try {
             const localFilePath = pathUtils.getLocalFilePathFromRemote(treeItem.remotePath, this.localRootPath);
-<<<<<<< HEAD:src/tree-provider.js
-            const relativeLocalPath = path.relative(this.localRootPath, localFilePath);
-            const warningMsg = `This will create the following file and folders on your local system:\n${relativeLocalPath}\n\nContinue?`;
-            const confirm = await vscode.window.showWarningMessage(warningMsg, { modal: true }, 'Yes');
-            if (confirm !== 'Yes') {
-                return { success: false, message: 'User cancelled download.' };
-            }
-
-            console.log(`📥 Downloading: ${treeItem.remotePath}`);
-            console.log(`   Plugin files root: ${this.localRootPath}`);
-            console.log(`   Target file path: ${localFilePath}`);
-=======
->>>>>>> 25f6429057aac1ebbaf1ce01ec19e31c5958fbff:modules/tree-provider.js
 
             const dirCreated = await pathUtils.ensureLocalDir(localFilePath, {
                 isCustom: treeItem.isCustom,
@@ -478,11 +465,7 @@ class PowerSchoolTreeProvider {
 
             pathUtils.writeFile(localFilePath, fileContent);
 
-<<<<<<< HEAD:src/tree-provider.js
-            console.log(`✅ Downloaded: ${treeItem.remotePath}`);
-=======
             const relativeLocalPath = path.relative(this.localRootPath, localFilePath);
->>>>>>> 25f6429057aac1ebbaf1ce01ec19e31c5958fbff:modules/tree-provider.js
             vscode.window.showInformationMessage(
                 `${fileExists ? 'Updated' : 'Downloaded'} ${treeItem.label} to ${relativeLocalPath}`
             );
@@ -504,66 +487,6 @@ class PowerSchoolTreeProvider {
             return { success: false, message: error.message };
         }
     }
-<<<<<<< HEAD:src/tree-provider.js
-
-    async downloadFileContent(filePath) {
-        const queryParams = new URLSearchParams({
-            LoadFolderInfo: 'false',
-            path: filePath
-        });
-        const endpoint = '/ws/cpm/builtintext';
-        await this.psApi.ensureAuthenticated(endpoint);
-        const options = {
-            hostname: new URL(this.psApi.baseUrl).hostname,
-            port: 443,
-            path: `${endpoint}?${queryParams.toString()}`,
-            method: 'GET',
-            rejectUnauthorized: false,
-            headers: {
-                'Referer': `${this.psApi.baseUrl}/admin/customization/home.html`,
-                'Accept': 'application/json',
-                'User-Agent': 'ps-vscode-cpm/2.5.0',
-                'Cookie': this.psApi.getCookieHeader()
-            }
-        };
-
-        return new Promise((resolve, reject) => {
-            const req = https.request(options, (res) => {
-                let data = '';
-                res.on('data', (chunk) => {
-                    data += chunk;
-                });
-                res.on('end', () => {
-                    try {
-                        const response = JSON.parse(data);
-                        if (res.statusCode === 200) {
-                            // Prefer real content, avoid saving 'not available' message
-                            const notAvailableMsg = 'Active custom file';
-                            let content = '';
-                            if (response.activeCustomText && !response.activeCustomText.startsWith(notAvailableMsg)) {
-                                content = response.activeCustomText;
-                            } else if (response.builtInText && !response.builtInText.startsWith(notAvailableMsg)) {
-                                content = response.builtInText;
-                            }
-                            if (!content) {
-                                reject(new Error('File is not available as a custom or stock file on the server.'));
-                            } else {
-                                resolve(content);
-                            }
-                        } else {
-                            reject(new Error(`Failed to download file: ${response.message || data}`));
-                        }
-                    } catch (error) {
-                        reject(error);
-                    }
-                });
-            });
-            req.on('error', reject);
-            req.end();
-        });
-    }
-=======
->>>>>>> 25f6429057aac1ebbaf1ce01ec19e31c5958fbff:modules/tree-provider.js
     
     async publishFile(treeItem) {
         if (!treeItem || treeItem.contextValue !== 'file') {
