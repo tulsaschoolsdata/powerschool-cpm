@@ -16,6 +16,23 @@ const {
 } = require('./modules/panel-providers');
 
 function activate(context) {
+        // Register custom content provider for powerschool: scheme
+        const powerschoolContentProvider = {
+            provideTextDocumentContent: async (uri) => {
+                // uri.path is the PowerSchool remote path
+                const remotePath = uri.path;
+                // Use API to fetch file content
+                try {
+                    const content = await api.downloadFileContent(remotePath);
+                    return content || '';
+                } catch (err) {
+                    return `Error loading remote file: ${err.message}`;
+                }
+            }
+        };
+        context.subscriptions.push(
+            vscode.workspace.registerTextDocumentContentProvider('powerschool', powerschoolContentProvider)
+        );
     // Get workspace folder - use the first workspace folder as root
     let pluginFilesRoot = pathUtils.getPluginFilesRoot();
 
