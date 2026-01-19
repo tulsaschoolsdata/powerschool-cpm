@@ -475,16 +475,27 @@ class PowerSchoolAPI {
     }
 
     async downloadFileContent(filePath) {
+        const result = await this.downloadFileWithMetadata(filePath);
+        return result.content;
+    }
+
+    /**
+     * Downloads file content along with metadata (customContentId, etc.)
+     * Used for conflict detection during sync operations.
+     * @param {string} filePath - Remote path to the file
+     * @returns {Promise<{content: string, customContentId: number|null, isCustom: boolean, rawResponse: object}>}
+     */
+    async downloadFileWithMetadata(filePath) {
         const queryParams = new URLSearchParams({
             LoadFolderInfo: 'false',
             path: filePath
         });
-        
+
         const endpoint = `/ws/cpm/builtintext?${queryParams.toString()}`;
         await this.ensureAuthenticated(endpoint);
-        
+
         const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
-        
+
         const options = {
             hostname: new URL(this.baseUrl).hostname,
             port: 443,
@@ -520,16 +531,34 @@ class PowerSchoolAPI {
                             } else if (result.activeCustomText && !result.activeCustomText.startsWith('Active custom file')) {
                                 content = result.activeCustomText;
                             }
-                            resolve(content);
+
+                            // Extract customContentId and cache it
+                            const customContentId = result.activeCustomContentId || null;
+                            if (customContentId) {
+                                this.contentIdCache.set(filePath, customContentId);
+                                this.saveCacheToStorage();
+                            }
+
+                            resolve({
+                                content,
+                                customContentId,
+                                isCustom: result.isCustom === true,
+                                rawResponse: result
+                            });
                         } catch (error) {
-                            resolve(data);
+                            resolve({
+                                content: data,
+                                customContentId: null,
+                                isCustom: false,
+                                rawResponse: null
+                            });
                         }
                     } else {
                         reject(new Error(`Download failed: HTTP ${res.statusCode}`));
                     }
                 });
             });
-            
+
             req.on('error', error => reject(error));
             req.end();
         });
@@ -724,6 +753,74 @@ class PowerSchoolAPI {
 
     async updateExistingFileContent(filePath, content) {
         return await this.uploadFileContent(filePath, content);
+    }
+
+    /**
+     * Delete a custom file from PowerSchool.
+     * If the file is a built-in file that was customized, this removes the customization.
+     * @param {string} filePath - Remote path to the file (e.g., /admin/custom.html)
+     * @returns {Promise<{success: boolean, message: string}>}
+     */
+    async deleteFile(filePath) {
+        const endpoint = '/ws/cpm/deleteFile';
+        await this.ensureAuthenticated(endpoint);
+
+        const postData = `path=${encodeURIComponent(filePath)}`;
+        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+
+        const options = {
+            hostname: new URL(this.baseUrl).hostname,
+            port: 443,
+            path: endpoint,
+            method: 'POST',
+            rejectUnauthorized: false,
+            headers: {
+                'Referer': `${this.baseUrl}/admin/customization/home.html`,
+                'Accept': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Length': Buffer.byteLength(postData),
+                'User-Agent': 'ps-vscode-cpm/2.5.0',
+                ...authHeaders
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                    try {
+                        const result = JSON.parse(data);
+
+                        if (res.statusCode === 200) {
+                            // Check for success message
+                            if (result.returnMessage === 'The file was deleted sucessfully') {
+                                // Note: PowerSchool has a typo in "sucessfully" - matching their API
+                                // Remove from cache since file no longer exists
+                                this.contentIdCache.delete(filePath);
+                                this.saveCacheToStorage();
+
+                                resolve({ success: true, message: 'File deleted successfully' });
+                            } else if (result.returnMessage) {
+                                reject(new Error(result.returnMessage));
+                            } else {
+                                resolve({ success: true, message: 'File deleted' });
+                            }
+                        } else if (res.statusCode === 400) {
+                            reject(new Error(result.message || 'File could not be deleted'));
+                        } else {
+                            reject(new Error(`Delete failed: HTTP ${res.statusCode}`));
+                        }
+                    } catch (error) {
+                        reject(new Error(`Failed to parse delete response: ${error.message}`));
+                    }
+                });
+            });
+
+            req.on('error', error => reject(new Error(`Delete request failed: ${error.message}`)));
+            req.write(postData);
+            req.end();
+        });
     }
 }
 
