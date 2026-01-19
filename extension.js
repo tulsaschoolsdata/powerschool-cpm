@@ -16,34 +16,35 @@ const {
 } = require('./modules/panel-providers');
 
 function activate(context) {
-        // Register custom content provider for powerschool: scheme
-        const powerschoolContentProvider = {
-            provideTextDocumentContent: async (uri) => {
-                // uri.path is the PowerSchool remote path
-                const remotePath = uri.path;
-                // Use API to fetch file content
-                try {
-                    const content = await api.downloadFileContent(remotePath);
-                    return content || '';
-                } catch (err) {
-                    return `Error loading remote file: ${err.message}`;
-                }
-            }
-        };
-        context.subscriptions.push(
-            vscode.workspace.registerTextDocumentContentProvider('powerschool', powerschoolContentProvider)
-        );
     // Get workspace folder - use the first workspace folder as root
     let pluginFilesRoot = pathUtils.getPluginFilesRoot();
 
     // Initialize PowerSchool API and Tree Provider
     const api = new PowerSchoolAPI();
     api.initialize(); // Load configuration from VS Code settings
-    
+
     // Set workspace state for persistent cache storage
     api.setWorkspaceState(context.workspaceState);
-    
+
     const treeProvider = new PowerSchoolTreeProvider(api, pluginFilesRoot);
+
+    // Register custom content provider for powerschool: scheme (for virtual document viewing)
+    const powerschoolContentProvider = {
+        provideTextDocumentContent: async (uri) => {
+            // uri.path is the PowerSchool remote path
+            const remotePath = uri.path;
+            // Use API to fetch file content
+            try {
+                const content = await api.downloadFileContent(remotePath);
+                return content || '';
+            } catch (err) {
+                return `Error loading remote file: ${err.message}`;
+            }
+        }
+    };
+    context.subscriptions.push(
+        vscode.workspace.registerTextDocumentContentProvider('powerschool', powerschoolContentProvider)
+    );
     
     // Store globally for cleanup
     global.powerschoolCpmTreeProvider = treeProvider;
@@ -128,9 +129,32 @@ function activate(context) {
             treeDataProvider: treeProvider,
             showCollapseAll: true
         });
-        
+
         // Store globally for cleanup
         global.powerschoolCpmTreeView = treeView;
+
+        // Show server settings confirmation when panel is first opened
+        let hasShownSettingsAlert = false;
+        treeView.onDidChangeVisibility(async (e) => {
+            if (e.visible && !hasShownSettingsAlert) {
+                hasShownSettingsAlert = true;
+
+                const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
+                const serverUrl = config.get('serverUrl', '(not configured)') || '(not configured)';
+                const pluginWebRoot = config.get('pluginWebRoot', 'web_root') || 'web_root';
+
+                const choice = await vscode.window.showInformationMessage(
+                    `PowerSchool CPM Settings:\n\nServer: ${serverUrl}\nPlugin Root: ${pluginWebRoot}`,
+                    { modal: true },
+                    'Continue',
+                    'Change Settings'
+                );
+
+                if (choice === 'Change Settings') {
+                    vscode.commands.executeCommand('workbench.action.openSettings', 'ps-vscode-cpm');
+                }
+            }
+        });
         
         // Register panel tree views
         serverInfoView = vscode.window.createTreeView('ps-vscode-cpm-server-info', {

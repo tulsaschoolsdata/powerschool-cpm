@@ -2,7 +2,7 @@
   "name": "ps-vscode-cpm",
   "displayName": "ps-vscode-cpm",
   "description": "Manage custom pages in PowerSchool",
-  "version": "4.1.1",
+  "version": "4.3.0",
   "publisher": "zuvy",
   "engines": {
     "vscode": "^1.104.0"
@@ -35,6 +35,11 @@
       {
         "command": "ps-vscode-cpm.publishCurrentFile",
         "title": "ps-vscode-cpm: Publish Current File"
+      },
+      {
+        "command": "ps-vscode-cpm.deleteFileFromServer",
+        "title": "Delete from PowerSchool",
+        "icon": "$(trash)"
       },
       {
         "command": "ps-vscode-cpm.createNewFile",
@@ -200,6 +205,11 @@
           "command": "ps-vscode-cpm.publishFile",
           "when": "view == ps-vscode-cpm-explorer && (viewItem == file || viewItem == file-custom || viewItem == file-custom-plugin)",
           "group": "inline"
+        },
+        {
+          "command": "ps-vscode-cpm.deleteFileFromServer",
+          "when": "view == ps-vscode-cpm-explorer && (viewItem == file-custom || viewItem == file-custom-plugin)",
+          "group": "context"
         }
       ]
     },

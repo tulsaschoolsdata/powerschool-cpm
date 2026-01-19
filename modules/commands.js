@@ -484,6 +484,15 @@ function registerFileCommands(context, api, treeProvider) {
         }
     }));
 
+    // Delete file from server command
+    commands.push(registerCommandSafely('ps-vscode-cpm.deleteFileFromServer', async (treeItem) => {
+        if (!treeItem) {
+            vscode.window.showErrorMessage('No file selected for deletion.');
+            return;
+        }
+        await treeProvider.deleteFileFromServer(treeItem);
+    }));
+
     return commands;
 }
 
