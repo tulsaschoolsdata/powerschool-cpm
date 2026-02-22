@@ -476,8 +476,7 @@ class PowerSchoolTreeProvider {
                             { modal: true },
                             'Overwrite Local',
                             'Open Local',
-                            'Compare',
-                            'Cancel'
+                            'Compare'
                         );
 
                         if (choice === 'Overwrite Local') {
@@ -536,17 +535,26 @@ class PowerSchoolTreeProvider {
                     }
                 }
             } else {
-                // Local file doesn't exist - prompt to create directory if needed, then download
-                const dirCreated = await pathUtils.ensureLocalDir(localFilePath, {
+                // Local file doesn't exist - prompt user for action
+                const userChoice = await pathUtils.ensureLocalDir(localFilePath, {
                     isCustom: treeItem.isCustom,
                     fileName: treeItem.label,
                     localRootPath: this.localRootPath
                 });
 
-                if (!dirCreated) {
+                if (!userChoice) {
                     return { success: false, message: 'Download cancelled by user', action: 'cancelled' };
                 }
 
+                if (userChoice === 'readonly') {
+                    // Open as virtual read-only document without saving locally
+                    const virtualUri = vscode.Uri.parse(`powerschool:${treeItem.remotePath}`);
+                    const document = await vscode.workspace.openTextDocument(virtualUri);
+                    await vscode.window.showTextDocument(document, { preview: true });
+                    return { success: true, action: 'readonly' };
+                }
+
+                // userChoice === 'download': write locally and open
                 pathUtils.writeFile(localFilePath, serverContent);
 
                 const relativeLocalPath = path.relative(this.localRootPath, localFilePath);
