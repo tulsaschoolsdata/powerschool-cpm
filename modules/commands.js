@@ -124,33 +124,6 @@ function registerCommands(context, api, treeProvider) {
         vscode.window.showInformationMessage('PowerSchool connection refreshed! Tree will reload with new settings.');
     }));
 
-    // Test connection command
-    commands.push(registerCommandSafely('ps-vscode-cpm.testConnection', async () => {
-        try {
-            vscode.window.showInformationMessage('🧪 Testing PowerSchool OAuth connection and CPM API access...');
-            const results = await api.testOAuthConnection();
-            
-            let message = '📊 Connection Test Results:\\n\\n';
-            message += `✅ Basic API: ${results.basicAPI.success ? 'Working' : 'Failed'}\\n`;
-            message += `${results.cpmTree.success ? '✅' : '❌'} CPM Tree: ${results.cpmTree.success ? 'Working' : `Failed (${results.cpmTree.status})`}\\n`;
-            
-            if (results.basicAPI.success && !results.cpmTree.success) {
-                message += '\\n🔍 OAuth is working but CPM APIs are not accessible.\\nThis suggests CPM endpoints may not support OAuth authentication.';
-            } else if (results.basicAPI.success && results.cpmTree.success) {
-                message += '\\n🎉 Both basic API and CPM APIs are working!';
-            }
-            
-            if (results.basicAPI.success) {
-                vscode.window.showInformationMessage(message);
-            } else {
-                vscode.window.showErrorMessage('❌ OAuth authentication failed. Check your credentials and server URL.');
-            }
-            
-        } catch (error) {
-            vscode.window.showErrorMessage(`❌ Connection test failed: ${error.message}`);
-        }
-    }));
-
     // Test JSON endpoint command
     commands.push(registerCommandSafely('ps-vscode-cpm.testJsonEndpoint', async () => {
         try {

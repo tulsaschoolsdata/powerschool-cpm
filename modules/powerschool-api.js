@@ -17,17 +17,9 @@ function generateMultipartData(fields, boundary) {
 class PowerSchoolAPI {
     constructor() {
         this.baseUrl = '';
-        this.clientId = '';
-        this.clientSecret = '';
         this.username = '';
         this.password = '';
-        this.authMethod = 'hybrid'; // 'oauth', 'session', or 'hybrid'
-        
-        // OAuth properties
-        this.accessToken = null;
-        this.tokenExpiry = 0;
-        this.tokenType = 'Bearer';
-        
+
         // Session properties
         this.sessionValid = false;
         this.lastSessionCheck = 0;
@@ -67,11 +59,8 @@ class PowerSchoolAPI {
     initialize() {
         const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
         this.baseUrl = config.get('serverUrl', '').replace(/\/$/, '');
-        this.clientId = config.get('clientId');
-        this.clientSecret = config.get('clientSecret');
         this.username = config.get('username');
         this.password = config.get('password');
-        this.authMethod = config.get('authMethod', 'hybrid');
         
         if (!this.baseUrl) {
             throw new Error('PowerSchool server URL not configured. Please set ps-vscode-cpm.serverUrl in settings.');
@@ -79,10 +68,6 @@ class PowerSchoolAPI {
     }
 
     clearAuth() {
-        // Clear OAuth state
-        this.accessToken = null;
-        this.tokenExpiry = 0;
-        // Clear session state
         this.sessionValid = false;
         this.lastSessionCheck = 0;
         this.cookies.clear();
@@ -91,85 +76,8 @@ class PowerSchoolAPI {
         // this.contentIdCache.clear();
     }
 
-    getAuthMethodForEndpoint(endpoint) {
-        if (this.authMethod === 'session') return 'session';
-        if (this.authMethod === 'oauth') return 'oauth';
-        
-        // HYBRID: CPM, PowerQuery, and /admin/ paths need session, others use OAuth
-        if (this.authMethod === 'hybrid') {
-            if (endpoint.includes('/ws/cpm/') || 
-                endpoint.includes('/ws/schema/query/') ||
-                endpoint.startsWith('/admin/')) {
-                return 'session';
-            }
-            return 'oauth';
-        }
-        
-        return 'oauth'; // fallback
-    }
-
-    async ensureAuthenticated(endpoint = '/ws/v1/school') {
-        const authMethod = this.getAuthMethodForEndpoint(endpoint);
-        
-        if (authMethod === 'session') {
-            await this.ensureSessionAuth();
-        } else {
-            await this.ensureOAuthToken();
-        }
-    }
-
-    async ensureOAuthToken() {
-        if (this.accessToken && this.tokenExpiry && Date.now() < this.tokenExpiry) {
-            return; // Token is still valid
-        }
-
-        if (!this.clientId || !this.clientSecret) {
-            throw new Error('OAuth credentials not configured. Please set ps-vscode-cpm.clientId and ps-vscode-cpm.clientSecret in settings.');
-        }
-
-        const tokenEndpoint = '/oauth/access_token';
-        const credentials = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
-        
-        const postData = 'grant_type=client_credentials';
-        
-        const options = {
-            hostname: new URL(this.baseUrl).hostname,
-            port: 443,
-            path: tokenEndpoint,
-            method: 'POST',
-            rejectUnauthorized: false,
-            headers: {
-                'Authorization': `Basic ${credentials}`,
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Content-Length': Buffer.byteLength(postData),
-                'User-Agent': 'ps-vscode-cpm/2.5.0'
-            }
-        };
-
-        return new Promise((resolve, reject) => {
-            const req = https.request(options, (res) => {
-                let data = '';
-                res.on('data', chunk => data += chunk);
-                res.on('end', () => {
-                    try {
-                        const response = JSON.parse(data);
-                        if (res.statusCode === 200 && response.access_token) {
-                            this.accessToken = response.access_token;
-                            this.tokenExpiry = Date.now() + (response.expires_in * 1000);
-                            resolve();
-                        } else {
-                            reject(new Error(`OAuth failed: ${response.error || 'Unknown error'}`));
-                        }
-                    } catch (error) {
-                        reject(new Error(`Failed to parse OAuth response: ${error.message}`));
-                    }
-                });
-            });
-
-            req.on('error', error => reject(new Error(`OAuth request failed: ${error.message}`)));
-            req.write(postData);
-            req.end();
-        });
+    async ensureAuthenticated() {
+        await this.ensureSessionAuth();
     }
 
     // Session-based authentication methods
@@ -317,22 +225,14 @@ class PowerSchoolAPI {
         return true;
     }
 
-    getAuthHeadersForEndpoint(endpoint) {
-        const method = this.getAuthMethodForEndpoint(endpoint);
-        
-        if (method === 'session') {
-            return { 'Cookie': this.getCookieHeader() };
-        } else {
-            return { 'Authorization': `${this.tokenType} ${this.accessToken}` };
-        }
+    getAuthHeaders() {
+        return { 'Cookie': this.getCookieHeader() };
     }
 
     async makeRequest(endpoint, method = 'GET', data = null) {
-        const authMethod = this.getAuthMethodForEndpoint(endpoint);
-        
-        await this.ensureAuthenticated(endpoint);
-        
-        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        await this.ensureAuthenticated();
+
+        const authHeaders = this.getAuthHeaders();
         const isPost = method === 'POST';
         
         const options = {
@@ -377,38 +277,6 @@ class PowerSchoolAPI {
             
             req.end();
         });
-    }
-
-    async testOAuthConnection() {
-        const results = {
-            basicAPI: { success: false, error: null },
-            cpmTree: { success: false, error: null, status: null },
-            alternatives: []
-        };
-
-        try {
-            await this.ensureOAuthToken();
-            const response = await this.makeRequest('/ws/v1/school');
-            results.basicAPI.success = response.statusCode === 200;
-            if (!results.basicAPI.success) {
-                results.basicAPI.error = `HTTP ${response.statusCode}`;
-            }
-        } catch (error) {
-            results.basicAPI.error = error.message;
-        }
-
-        try {
-            const response = await this.makeRequest('/ws/cpm/tree?path=/&maxDepth=1');
-            results.cpmTree.success = response.statusCode === 200;
-            results.cpmTree.status = response.statusCode;
-            if (!results.cpmTree.success) {
-                results.cpmTree.error = `HTTP ${response.statusCode}`;
-            }
-        } catch (error) {
-            results.cpmTree.error = error.message;
-        }
-
-        return results;
     }
 
     async getFolderTree(path = '/', maxDepth = 1) {
@@ -492,9 +360,9 @@ class PowerSchoolAPI {
         });
 
         const endpoint = `/ws/cpm/builtintext?${queryParams.toString()}`;
-        await this.ensureAuthenticated(endpoint);
+        await this.ensureAuthenticated();
 
-        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        const authHeaders = this.getAuthHeaders();
 
         const options = {
             hostname: new URL(this.baseUrl).hostname,
@@ -565,8 +433,7 @@ class PowerSchoolAPI {
     }
 
     async uploadFileContent(filePath, content) {
-        const endpoint = '/ws/cpm/customPageContent';
-        await this.ensureAuthenticated(endpoint);
+        await this.ensureAuthenticated();
         
         // FIRST: Check cache for existing customContentId (fastest path)
         const cachedId = this.contentIdCache.get(filePath);
@@ -625,7 +492,7 @@ class PowerSchoolAPI {
         };
         
         const multipartData = generateMultipartData(formFields, boundary);
-        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        const authHeaders = this.getAuthHeaders();
         
         const options = {
             hostname: new URL(this.baseUrl).hostname,
@@ -684,9 +551,9 @@ class PowerSchoolAPI {
         });
 
         const endpoint = `/ws/cpm/builtintext?${queryParams.toString()}`;
-        await this.ensureAuthenticated(endpoint);
+        await this.ensureAuthenticated();
         
-        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        const authHeaders = this.getAuthHeaders();
         
         const options = {
             hostname: new URL(this.baseUrl).hostname,
@@ -763,10 +630,10 @@ class PowerSchoolAPI {
      */
     async deleteFile(filePath) {
         const endpoint = '/ws/cpm/deleteFile';
-        await this.ensureAuthenticated(endpoint);
+        await this.ensureAuthenticated();
 
         const postData = `path=${encodeURIComponent(filePath)}`;
-        const authHeaders = this.getAuthHeadersForEndpoint(endpoint);
+        const authHeaders = this.getAuthHeaders();
 
         const options = {
             hostname: new URL(this.baseUrl).hostname,

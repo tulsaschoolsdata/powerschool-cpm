@@ -135,11 +135,6 @@
         "icon": "$(settings-gear)"
       },
       {
-        "command": "ps-vscode-cpm.testConnection",
-        "title": "ps-vscode-cpm: Test OAuth Connection",
-        "icon": "$(plug)"
-      },
-      {
         "command": "ps-vscode-cpm.testJsonEndpoint",
         "title": "ps-vscode-cpm: Test JSON Endpoint",
         "icon": "$(json)"
@@ -222,18 +217,6 @@
           "description": "PowerSchool server URL (e.g., https://pstest.yourschool.org)",
           "scope": "window"
         },
-        "ps-vscode-cpm.clientId": {
-          "type": "string",
-          "default": "",
-          "description": "PowerSchool OAuth client ID for API access",
-          "scope": "window"
-        },
-        "ps-vscode-cpm.clientSecret": {
-          "type": "string",
-          "default": "",
-          "description": "PowerSchool OAuth client secret for API access (stored securely)",
-          "scope": "window"
-        },
         "ps-vscode-cpm.username": {
           "type": "string",
           "default": "",
@@ -245,17 +228,6 @@
           "default": "",
           "description": "PowerSchool password for CPM session authentication (fallback for CPM APIs)",
           "scope": "window"
-        },
-        "ps-vscode-cpm.authMethod": {
-          "type": "string",
-          "default": "oauth",
-          "enum": ["oauth", "session", "hybrid"],
-          "enumDescriptions": [
-            "Use OAuth only (for standard APIs)",
-            "Use session authentication only (username/password)",
-            "Use OAuth for standard APIs, session for CPM APIs"
-          ],
-          "description": "Authentication method for PowerSchool API access"
         },
         "ps-vscode-cpm.pluginWebRoot": {
           "type": "string",
