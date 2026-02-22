@@ -83,13 +83,13 @@ function pathsMatch(remotePath, localFilePath, pluginFilesRoot) {
 /**
  * Ensure the directory for a local file path exists, prompting the user if needed.
  * Also prompts if file doesn't exist in web_root workspace.
- * Returns true if the directory exists or was created, false if cancelled.
+ * Returns 'download' if the file should be downloaded, 'readonly' if it should be opened read-only, false if cancelled.
  * @param {string} localFilePath
  * @param {Object} options - Additional context for the prompt
  * @param {boolean} options.isCustom - Whether this is a custom file
  * @param {string} options.fileName - Name of the file being downloaded
  * @param {string} options.localRootPath - Root path of the workspace
- * @returns {Promise<boolean>}
+ * @returns {Promise<'download'|'readonly'|false>}
  */
 async function ensureLocalDir(localFilePath, options = {}) {
     const localDir = path.dirname(localFilePath);
@@ -116,25 +116,27 @@ async function ensureLocalDir(localFilePath, options = {}) {
             message += `This is a ${fileType}.\n\n`;
         }
         
-        message += !dirExists ? 'Create directory and download file?' : 'Download file?';
-        
-        const createDir = await vscode.window.showWarningMessage(
+        message += 'How would you like to proceed?';
+
+        const choice = await vscode.window.showWarningMessage(
             message,
             { modal: true },
-            !dirExists ? 'Create & Download' : 'Download',
-            'Cancel'
+            'Open Read Only',
+            'Download and Create'
         );
-        
-        if (createDir === 'Create & Download' || createDir === 'Download') {
+
+        if (choice === 'Download and Create') {
             if (!dirExists) {
                 fs.mkdirSync(localDir, { recursive: true });
             }
-            return true;
+            return 'download';
+        } else if (choice === 'Open Read Only') {
+            return 'readonly';
         } else {
             return false;
         }
     }
-    return true;
+    return 'download';
 }
 
 /**
