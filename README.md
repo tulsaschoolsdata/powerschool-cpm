@@ -1,11 +1,40 @@
 # PowerSchool CPM Extension
 
-A VS Code extension that provides seamless integration with PowerSchool's Custom Page Management system. This extension syncs your current workspace directory with PowerSchool's file structure, making plugin development and management of custom pages easier.
+A VS Code extension that provides seamless integration with PowerSchool's Custom Page Management (CPM) system. Browse, edit, publish, and manage your PowerSchool custom pages and plugin files directly from VS Code.
 
-## Features
-- **PowerSchool API Integration**: Uses PowerSchool's CPM API to fetch folder structures
-- **File System Management**: Saves files to local file structure and publishes them to PowerSchool to see real time changes
-- **Configuration Options**: Customizable server URL, sync depth
+## Companion Plugin (Recommended)
+
+For best results, install the companion PowerSchool plugin:
+
+**[powerschool-cpm-plugin](https://github.com/zuvy/powerschool-cpm-plugin)**
+
+The companion plugin serves a `plugin_data.json` file from your PowerSchool server that the extension uses to enrich the file tree. With it installed, files owned by PowerSchool plugins will display the plugin name and enabled status in their tooltips, and will be color-coded differently from built-in CPM files. Without it the extension still works fully — file browsing, downloading, and publishing all operate through the standard CPM API regardless.
+
+### Installing the Companion Plugin
+
+1. Go to the [releases page](https://github.com/zuvy/powerschool-cpm-plugin/releases) and download the latest `.zip` plugin file
+2. Log in to your PowerSchool admin panel
+3. Navigate to **System > System Settings > Plugin Management Configuration**
+4. Click **Install** and upload the `.zip` file
+5. Enable the plugin after installation
+
+## Installing the VS Code Extension
+
+### From a VSIX File
+
+Download the latest `.vsix` file from the [releases](https://github.com/zuvy/ps-vscode-cpm/releases) page, then install it from the terminal:
+
+```bash
+code --install-extension ps-vscode-cpm-5.0.0.vsix
+```
+
+Replace `ps-vscode-cpm-5.0.0.vsix` with the actual filename you downloaded.
+
+To verify the installation:
+
+```bash
+code --list-extensions | grep ps-vscode-cpm
+```
 
 ## Requirements
 
@@ -15,98 +44,136 @@ A VS Code extension that provides seamless integration with PowerSchool's Custom
 
 ## Setup
 
-1. **Install the Extension**: Install this extension in VS Code
-2. **Configure Environment Variables**: See AUTH_SETUP.md
-3. **Open Workspace**: Open any folder in VS Code to use as your PowerSchool development workspace
-    When developing a plugin, web_root must be
+1. **Install the Extension** from a VSIX file (see above) or the VS Code marketplace
+2. **Open your workspace**: Open your plugin folder in VS Code. For plugin development, the workspace should be your plugin root (the folder containing `plugin.xml` and `web_root/`)
+3. **Configure Server Settings**: Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run `ps-vscode-cpm: Configure Server Settings`, or go to VS Code Settings and search for `ps-vscode-cpm`
+4. **Set your Plugin Web Root**: Run `ps-vscode-cpm: Setup Plugin Web Root Directory` to tell the extension where your `web_root` lives relative to the workspace
 
 ## Extension Settings
 
-This extension contributes the following settings:
+| Setting | Default | Description |
+|---|---|---|
+| `ps-vscode-cpm.serverUrl` | `""` | PowerSchool server URL (e.g., `https://pstest.yourschool.org`) |
+| `ps-vscode-cpm.username` | `""` | PowerSchool admin username |
+| `ps-vscode-cpm.password` | `""` | PowerSchool admin password |
+| `ps-vscode-cpm.pluginWebRoot` | `"web_root"` | Path to `web_root` relative to workspace root |
+| `ps-vscode-cpm.autoSync` | `true` | Automatically sync file tree when workspace opens |
+| `ps-vscode-cpm.maxDepth` | `5` | Maximum folder depth to sync from PowerSchool |
 
-* `ps-vscode-cpm.autoSync`: Enable/disable automatic sync when workspace opens (default: true)
-* `ps-vscode-cpm.maxDepth`: Maximum folder depth to sync from PowerSchool (default: 5)
+### Plugin Web Root Options
 
-## Environment Configuration
+| Value | Resolved Path |
+|---|---|
+| `""` | `<workspace>/` (workspace is the web root) |
+| `"web_root"` | `<workspace>/web_root/` |
+| `"src"` | `<workspace>/src/web_root/` |
+| `"src/web_root"` | `<workspace>/src/web_root/` |
 
+## Features
 
-* `TEST_SERVER_URI`: PowerSchool server URL (e.g., http://pstest.yourschool.org)
-* `TEST_SERVER_CLIENT_ID`: PowerSchool OAuth client ID from basic oauth plugin.
-* `TEST_SERVER_CLIENT_SECRET`: PowerSchool OAuth client secret from basic oauth plugin.
+### Activity Bar Panel
 
-## Commands
+Click the PowerSchool icon in the activity bar to access five panels:
 
-Access these commands via the Command Palette (Ctrl+Shift+P): or the context Menu.
+- **PowerSchool Files** — Browse the remote file tree. Files are color-coded by type (built-in vs. custom)
+- **Commands** — Quick access to common extension actions
+- **Server Info** — View connection status and server details
+- **Templates** — Insert pre-built page templates
+- **Snippets** — Insert common PowerSchool code patterns
 
-<img width="409" height="301" alt="image" src="https://github.com/user-attachments/assets/1d68bfd5-dc7c-4f68-8c11-98c2c5febfe1" />
+### File Operations
 
+| Command | Description |
+|---|---|
+| **Download File** | Download a remote file to your local workspace |
+| **Publish to PowerSchool** | Upload a local file to PowerSchool (inline button or context menu) |
+| **Publish Current File** | Publish the file currently open in the editor |
+| **Publish New File to PowerSchool** | Upload a new file that doesn't yet exist on the server |
+| **Delete from PowerSchool** | Remove a custom file from the server |
+| **Show File Path Info** | Display the resolved local and remote paths for the current file |
+
+### Plugin Tools
+
+| Command | Description |
+|---|---|
+| **Package Plugin as ZIP** | Package your plugin directory as a ZIP ready for PowerSchool import |
+| **Setup Plugin Web Root Directory** | Configure which folder maps to `web_root` |
+| **Configure Server Settings** | Open the settings UI for server URL and credentials |
+| **Test JSON Endpoint** | Test a custom API endpoint on your PowerSchool server |
+| **Refresh** | Reload the remote file tree |
+
+### Page Templates
+
+Quickly scaffold new pages via the **Templates** panel or Command Palette:
+
+- Admin Page
+- Admin Student Page
+- Teacher Page
+- Teacher Backpack Page
+- Parent Portal Page
+
+### Code Snippets
+
+Insert common PowerSchool patterns via the **Snippets** panel or `ps-vscode-cpm: Insert Code Snippet`:
+
+- Box-Round Div
+- Date Picker Widget
+- Dialog Link
+- Dynamic Tabs
+- jQuery Function Block
+- PowerSchool Form
+- Data Table
+- TList SQL Block
+- Collapsible Box
+- If/Else Block
+- Student Info Tags
+- Breadcrumb Navigation
 
 ## How It Works
 
-1. **Detection**: When VS Code opens a workspace, the extension detects the file structure of the plugin.
-3. **OAuth Authentication**: Authenticates with PowerSchool using client credentials flow
-4. **API Call**: Fetches the folder tree structure from `/ws/cpm/tree` endpoint using Bearer token
-5. **Comparison**: Compares remote structure with local directory
-
-## PowerSchool API Integration
-
-This extension uses PowerSchool's Custom Page Management API endpoints:
-
-- `GET /ws/cpm/tree` - Retrieves folder/file structure
-- `GET /ws/cpm/builtintext` - Gets file contents (future feature)
-- Additional endpoints for full CRUD operations (planned)
+1. On workspace open, the extension reads your VS Code settings to locate the server and credentials
+2. It authenticates with PowerSchool using your admin username and password
+3. The remote CPM file tree is fetched and displayed in the **PowerSchool Files** panel
+4. Local files are compared against the remote structure — icons indicate sync status
+5. Editing and saving a file locally pre-fetches the remote content ID to speed up publishing
+6. Publishing pushes the local file contents directly to PowerSchool via the CPM API
 
 ## Directory Structure
 
+For plugin development, your workspace should look like:
+
 ```
-your-workspace/          # Current workspace folder (synced with PowerSchool)
-├── admin/               # Admin pages
-├── guardian/            # Guardian portal pages  
-├── student/             # Student portal pages
-├── teacher/             # Teacher portal pages
-├── ...                  # Other custom directories
-└── .vscode/
-    └── settings.json    # Workspace settings
+your-plugin/
+├── plugin.xml
+└── web_root/          # <-- set pluginWebRoot to "web_root"
+    ├── admin/
+    ├── guardian/
+    ├── student/
+    ├── teacher/
+    └── ...
 ```
 
 ## Known Issues
 
-- **Environment Security**: Ensure `.env.local` is not committed to version control (add to .gitignore)
-- **Binary Files**: Binary files are created as placeholder text files with metadata
-- **SSL Certificates**: Self-signed certificates are accepted for development environments
-- **Token Management**: OAuth tokens are automatically refreshed as needed
-
-## Usage Example
-
-1. Open any folder in VS Code as your workspace
-2. Configure your PowerSchool server URL in settings
-3. Click the PowerSchool icon in the activity bar to browse and sync files
-4. Edit files locally, then publish them back to PowerSchool using the extension commands
-
-## Future Features
-
-- Direct file content synchronization
-- Upload local changes to PowerSchool
-- Real-time sync capabilities
-- Better authentication handling
-- Support for custom SSL certificates
-
-## Development
-
-This extension is built using:
-- VS Code Extension API
-- Node.js built-in modules (https, fs, path)
-- PowerSchool Custom Page Management API
+- Self-signed SSL certificates are accepted to support development environments
+- Binary files are not supported for upload; only text-based files can be published
 
 ## Release Notes
 
+### 5.0.0
+
+- Full plugin file read/write support via companion plugin
+- Code snippets panel with common PowerSchool patterns
+- Page templates for admin, teacher, and parent portal pages
+- Package plugin as ZIP command
+- Plugin web root configuration for flexible workspace layouts
+- Inline publish and delete actions in the file tree
+- Auto-refresh on file save for improved publish performance
+- Server info and commands panels
+
 ### 0.0.1
 
-Initial release with:
-- Basic PowerSchool API integration
-- Directory structure synchronization
-- Configuration settings
-- Auto-sync on workspace open
+Initial release with basic PowerSchool API integration, directory structure synchronization, and auto-sync on workspace open.
 
 ---
 
