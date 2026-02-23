@@ -142,14 +142,14 @@ Insert common PowerSchool patterns via the **Snippets** panel or `ps-vscode-cpm:
 ## Suggested Work Flow
 
  - For New Plugins
-    1. Create the file structure and file stubs
-    2. Install the basic plugin on PowerSchool
-    3. Download the remote files instead of opening the local files (this caches the remote file id and insures a quicker publishing experience)
+    - Create the file structure and file stubs
+    - Install the basic plugin on PowerSchool
+    - Download the remote files instead of opening the local files (this caches the remote file id and insures a quicker publishing experience)
 
  - For Existing Plugins
-    1. Ensure the plugin Web Root setting is correct
-    2. Start with a clean workspace
-    3. Download the files you need to work with from the PowerSchool Server.
+    - Ensure the plugin Web Root setting is correct
+    - Start with a clean workspace
+    - Download the files you need to work with from the PowerSchool Server.
 
 ## Directory Structure
 
