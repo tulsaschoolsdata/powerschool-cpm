@@ -8,11 +8,11 @@ For best results, install the companion PowerSchool plugin:
 
 **[powerschool-cpm-plugin](https://github.com/zuvy/powerschool-cpm-plugin)**
 
-The companion plugin serves a `plugin_data.json` file from your PowerSchool server that the extension uses to enrich the file tree. With it installed, files owned by PowerSchool plugins will display the plugin name and enabled status in their tooltips, and will be color-coded differently from built-in CPM files. Without it the extension still works fully — file browsing, downloading, and publishing all operate through the standard CPM API regardless.
+The companion plugin provides meta data about PowerSchool plugins to enrich the file tree. With it installed, files owned by PowerSchool plugins will display the plugin name and enabled status in their tooltips, and will be color-coded differently from built-in CPM files. Without it the extension still works fully — file browsing, downloading, and publishing all operate through the standard CPM API regardless.
 
 ### Installing the Companion Plugin
 
-1. Go to the [releases page](https://github.com/zuvy/powerschool-cpm-plugin/releases) and download the latest `.zip` plugin file
+1. Go to the [releases page](https://github.com/zuvy/powerschool-cpm-plugin/releases/tag/v0.1.0) and download the `vscode_cpm.zip` plugin file
 2. Log in to your PowerSchool admin panel
 3. Navigate to **System > System Settings > Plugin Management Configuration**
 4. Click **Install** and upload the `.zip` file
@@ -22,7 +22,7 @@ The companion plugin serves a `plugin_data.json` file from your PowerSchool serv
 
 ### From a VSIX File
 
-Download the latest `.vsix` file from the [releases](https://github.com/zuvy/ps-vscode-cpm/releases) page, then install it from the terminal:
+Download the latest `.vsix` file from the [releases](https://github.com/tulsaschoolsdata/powerschool-cpm/releases/tag/v5.0.0) page, then install it from the terminal:
 
 ```bash
 code --install-extension ps-vscode-cpm-5.0.0.vsix
@@ -40,14 +40,15 @@ code --list-extensions | grep ps-vscode-cpm
 
 - VS Code 1.104.0 or higher
 - Access to a PowerSchool instance with Custom Page Management enabled
+- A Service Account with admin access to Custom Page Management
 - Network access to your PowerSchool server
 
 ## Setup
 
-1. **Install the Extension** from a VSIX file (see above) or the VS Code marketplace
-2. **Open your workspace**: Open your plugin folder in VS Code. For plugin development, the workspace should be your plugin root (the folder containing `plugin.xml` and `web_root/`)
+1. **Install the Extension** from a VSIX file (see above).
+2. **Open your workspace**: Open your plugin folder in VS Code. For plugin development, the workspace will usually be your plugin root (the folder containing `plugin.xml` and `web_root/`).
 3. **Configure Server Settings**: Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run `ps-vscode-cpm: Configure Server Settings`, or go to VS Code Settings and search for `ps-vscode-cpm`
-4. **Set your Plugin Web Root**: Run `ps-vscode-cpm: Setup Plugin Web Root Directory` to tell the extension where your `web_root` lives relative to the workspace
+4. **Set your Plugin Web Root**: Run `ps-vscode-cpm: Setup Plugin Web Root Directory` to tell the extension where your `web_root` or `query_root` and `plugin.xml` lives relative to the workspace
 
 ## Extension Settings
 
@@ -138,6 +139,18 @@ Insert common PowerSchool patterns via the **Snippets** panel or `ps-vscode-cpm:
 5. Editing and saving a file locally pre-fetches the remote content ID to speed up publishing
 6. Publishing pushes the local file contents directly to PowerSchool via the CPM API
 
+## Suggested Work Flow
+
+ - For New Plugins
+    1. Create the file structure and file stubs
+    2. Install the basic plugin on PowerSchool
+    3. Download the remote files instead of opening the local files (this caches the remote file id and insures a quicker publishing experience)
+
+ - For Existing Plugins
+    1. Ensure the plugin Web Root setting is correct
+    2. Start with a clean workspace
+    3. Download the files you need to work with from the PowerSchool Server.
+
 ## Directory Structure
 
 For plugin development, your workspace should look like:
@@ -155,25 +168,7 @@ your-plugin/
 
 ## Known Issues
 
-- Self-signed SSL certificates are accepted to support development environments
 - Binary files are not supported for upload; only text-based files can be published
-
-## Release Notes
-
-### 5.0.0
-
-- Full plugin file read/write support via companion plugin
-- Code snippets panel with common PowerSchool patterns
-- Page templates for admin, teacher, and parent portal pages
-- Package plugin as ZIP command
-- Plugin web root configuration for flexible workspace layouts
-- Inline publish and delete actions in the file tree
-- Auto-refresh on file save for improved publish performance
-- Server info and commands panels
-
-### 0.0.1
-
-Initial release with basic PowerSchool API integration, directory structure synchronization, and auto-sync on workspace open.
 
 ---
 
