@@ -147,6 +147,10 @@
         "command": "ps-vscode-cpm.packagePlugin",
         "title": "ps-vscode-cpm: Package Plugin as ZIP",
         "icon": "$(package)"
+      },
+      {
+        "command": "ps-vscode-cpm.noJsonFiles",
+        "title": "ps-vscode-cpm: No JSON Files"
       }
     ],
     "views": {
@@ -183,6 +187,12 @@
       ]
     },
     "menus": {
+      "commandPalette": [
+        {
+          "command": "ps-vscode-cpm.noJsonFiles",
+          "when": "false"
+        }
+      ],
       "view/title": [
         {
           "command": "ps-vscode-cpm.refresh",
