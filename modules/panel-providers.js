@@ -1,26 +1,30 @@
 const vscode = require('vscode');
 const path = require('path');
+const fs = require('fs');
 
 /**
  * Tree item for displaying info or clickable commands
+ * @param {string} label
+ * @param {string} contextValue
+ * @param {object} [options]
  */
 class PanelTreeItem extends vscode.TreeItem {
     constructor(label, contextValue, options = {}) {
         super(label, options.collapsibleState || vscode.TreeItemCollapsibleState.None);
         this.contextValue = contextValue;
-        
+
         if (options.command) {
             this.command = options.command;
         }
-        
+
         if (options.iconPath) {
             this.iconPath = options.iconPath;
         }
-        
+
         if (options.description) {
             this.description = options.description;
         }
-        
+
         if (options.tooltip) {
             this.tooltip = options.tooltip;
         }
@@ -35,25 +39,27 @@ class ServerInfoProvider {
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
     }
-    
+
     refresh() {
         this._onDidChangeTreeData.fire();
     }
-    
+
+    /** @param {PanelTreeItem} element */
     getTreeItem(element) {
         return element;
     }
-    
+
+    /** @param {PanelTreeItem} element */
     getChildren(element) {
         if (element) {
             return [];
         }
-        
+
         const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
         const serverUrl = config.get('serverUrl', 'Not configured');
         const username = config.get('username', 'Not configured');
         const pluginWebRoot = config.get('pluginWebRoot', 'web_root');
-        
+
         const pathUtils = require('./path-utils');
         const pluginFilesRoot = pathUtils.getPluginFilesRoot();
         const items = [];
@@ -87,29 +93,68 @@ class ServerInfoProvider {
 }
 
 /**
+ * Returns true if at least one .json file exists anywhere under the plugin web root.
+ * @returns {boolean}
+ */
+function hasJsonFilesInWebRoot() {
+    const pathUtils = require('./path-utils');
+    const root = pathUtils.getPluginFilesRoot();
+    if (!root || !fs.existsSync(root)) return false;
+    /** @param {string} dir */
+    function check(dir) {
+        let entries;
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+        catch (_) { return false; }
+        for (const entry of entries) {
+            if (entry.isDirectory()) {
+                if (entry.name === 'pagecataloging') continue;
+                if (check(path.join(dir, entry.name))) return true;
+            } else if (entry.name.endsWith('.json')) {
+                return true;
+            }
+        }
+        return false;
+    }
+    return check(root);
+}
+
+/**
  * Provider for Commands panel - displays clickable command buttons
  */
 class CommandsProvider {
     constructor() {
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+        // Re-evaluate JSON availability when files are created/deleted or root changes
+        vscode.workspace.onDidCreateFiles(e => {
+            if (e.files.some(f => f.fsPath.endsWith('.json'))) this.refresh();
+        });
+        vscode.workspace.onDidDeleteFiles(e => {
+            if (e.files.some(f => f.fsPath.endsWith('.json'))) this.refresh();
+        });
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('ps-vscode-cpm.pluginWebRoot')) this.refresh();
+        });
     }
-    
+
     refresh() {
         this._onDidChangeTreeData.fire();
     }
-    
+
+    /** @param {PanelTreeItem} element */
     getTreeItem(element) {
         return element;
     }
-    
+
+    /** @param {PanelTreeItem} element */
     getChildren(element) {
         if (element) {
             return [];
         }
-        
+
         const items = [];
-        
+
         // File Commands
         items.push(new PanelTreeItem(
             'Create New File',
@@ -123,7 +168,7 @@ class CommandsProvider {
                 }
             }
         ));
-        
+
         items.push(new PanelTreeItem(
             'Publish Current File',
             'command',
@@ -136,7 +181,7 @@ class CommandsProvider {
                 }
             }
         ));
-        
+
         items.push(new PanelTreeItem(
             'Show File Path Info',
             'command',
@@ -149,7 +194,7 @@ class CommandsProvider {
                 }
             }
         ));
-        
+
         // Plugin Commands
         items.push(new PanelTreeItem(
             'Package Plugin as ZIP',
@@ -163,21 +208,28 @@ class CommandsProvider {
                 }
             }
         ));
-        
+
         // Settings & Connection
+        const jsonAvailable = hasJsonFilesInWebRoot();
         items.push(new PanelTreeItem(
-            'Test Connection',
+            'Test JSON Endpoint',
             'command',
             {
-                iconPath: new vscode.ThemeIcon('plug'),
-                tooltip: 'Test connection to PowerSchool server',
+                iconPath: new vscode.ThemeIcon(
+                    'json',
+                    jsonAvailable ? undefined : new vscode.ThemeColor('disabledForeground')
+                ),
+                tooltip: jsonAvailable
+                    ? 'Test JSON endpoints found in the plugin web root'
+                    : 'No .json files found in the plugin web root',
+                description: jsonAvailable ? undefined : 'no .json files',
                 command: {
-                    command: 'ps-vscode-cpm.testConnection',
-                    title: 'Test Connection'
+                    command: jsonAvailable ? 'ps-vscode-cpm.testJsonEndpoint' : 'ps-vscode-cpm.noJsonFiles',
+                    title: 'Test JSON Endpoint'
                 }
             }
         ));
-        
+
         return items;
     }
 }
@@ -190,22 +242,24 @@ class TemplatesProvider {
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
     }
-    
+
     refresh() {
         this._onDidChangeTreeData.fire();
     }
-    
+
+    /** @param {PanelTreeItem} element */
     getTreeItem(element) {
         return element;
     }
-    
+
+    /** @param {PanelTreeItem} element */
     getChildren(element) {
         if (element) {
             return [];
         }
-        
+
         const items = [];
-        
+
         // Admin Templates
         items.push(new PanelTreeItem(
             'Admin Page',
@@ -220,7 +274,7 @@ class TemplatesProvider {
                 }
             }
         ));
-        
+
         items.push(new PanelTreeItem(
             'Admin Student Page',
             'template',
@@ -234,7 +288,7 @@ class TemplatesProvider {
                 }
             }
         ));
-        
+
         // Teacher Templates
         items.push(new PanelTreeItem(
             'Teacher Page',
@@ -249,7 +303,7 @@ class TemplatesProvider {
                 }
             }
         ));
-        
+
         items.push(new PanelTreeItem(
             'Teacher Backpack Page',
             'template',
@@ -263,7 +317,7 @@ class TemplatesProvider {
                 }
             }
         ));
-        
+
         // Parent Templates
         items.push(new PanelTreeItem(
             'Parent Portal Page',
@@ -278,7 +332,7 @@ class TemplatesProvider {
                 }
             }
         ));
-        
+
         return items;
     }
 }
@@ -291,22 +345,24 @@ class SnippetsProvider {
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
     }
-    
+
     refresh() {
         this._onDidChangeTreeData.fire();
     }
-    
+
+    /** @param {PanelTreeItem} element */
     getTreeItem(element) {
         return element;
     }
-    
+
+    /** @param {PanelTreeItem} element */
     getChildren(element) {
         if (element) {
             return [];
         }
-        
+
         const items = [];
-        
+
         // Layout Snippets
         items.push(new PanelTreeItem(
             'Box Round Container',
@@ -321,7 +377,7 @@ class SnippetsProvider {
                 }
             }
         ));
-        
+
         items.push(new PanelTreeItem(
             'Data Table',
             'snippet',
@@ -335,7 +391,7 @@ class SnippetsProvider {
                 }
             }
         ));
-        
+
         items.push(new PanelTreeItem(
             'Collapsible Box',
             'snippet',
@@ -349,7 +405,7 @@ class SnippetsProvider {
                 }
             }
         ));
-        
+
         items.push(new PanelTreeItem(
             'Dynamic Tabs',
             'snippet',
@@ -363,7 +419,7 @@ class SnippetsProvider {
                 }
             }
         ));
-        
+
         // Forms Snippets
         items.push(new PanelTreeItem(
             'PowerSchool Form',
@@ -378,7 +434,7 @@ class SnippetsProvider {
                 }
             }
         ));
-        
+
         items.push(new PanelTreeItem(
             'Date Picker Widget',
             'snippet',
@@ -392,7 +448,7 @@ class SnippetsProvider {
                 }
             }
         ));
-        
+
         // PowerSchool-Specific
         items.push(new PanelTreeItem(
             'TList SQL Block',
@@ -407,7 +463,7 @@ class SnippetsProvider {
                 }
             }
         ));
-        
+
         items.push(new PanelTreeItem(
             'If/Else Block',
             'snippet',
@@ -421,7 +477,7 @@ class SnippetsProvider {
                 }
             }
         ));
-        
+
         items.push(new PanelTreeItem(
             'Student Info Tags',
             'snippet',
@@ -435,7 +491,7 @@ class SnippetsProvider {
                 }
             }
         ));
-        
+
         // JavaScript
         items.push(new PanelTreeItem(
             'jQuery Function Block',
@@ -450,7 +506,7 @@ class SnippetsProvider {
                 }
             }
         ));
-        
+
         // Navigation
         items.push(new PanelTreeItem(
             'Breadcrumb Navigation',
@@ -465,7 +521,7 @@ class SnippetsProvider {
                 }
             }
         ));
-        
+
         items.push(new PanelTreeItem(
             'Dialog Link',
             'snippet',
@@ -479,7 +535,7 @@ class SnippetsProvider {
                 }
             }
         ));
-        
+
         return items;
     }
 }

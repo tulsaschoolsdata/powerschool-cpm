@@ -18,6 +18,15 @@ function findFirstDifference(str1, str2) {
 // Use centralized path logic from path-utils
 const pathUtils = require('./path-utils');
 
+// Shared output channel for test results — created once, reused across invocations
+let _outputChannel;
+function getOutputChannel() {
+    if (!_outputChannel) {
+        _outputChannel = vscode.window.createOutputChannel('PowerSchool CPM');
+    }
+    return _outputChannel;
+}
+
 // Remove all local getPluginFilesRoot logic. Use pathUtils.getPluginFilesRoot() everywhere.
 
 // Helper to get the path to plugin.xml in the plugin root
@@ -124,44 +133,80 @@ function registerCommands(context, api, treeProvider) {
         vscode.window.showInformationMessage('PowerSchool connection refreshed! Tree will reload with new settings.');
     }));
 
-    // Test JSON endpoint command
+    // No JSON files available (shown when plugin web root has no .json files)
+    commands.push(registerCommandSafely('ps-vscode-cpm.noJsonFiles', () => {
+        vscode.window.showInformationMessage('No .json files found in the current plugin web root.');
+    }));
+
+    // Test JSON endpoint command — discovers .json files dynamically from the plugin web root
     commands.push(registerCommandSafely('ps-vscode-cpm.testJsonEndpoint', async () => {
         try {
-            const jsonFiles = [
-                '/admin/reports/registration/js/elem_reg.json',
-                '/admin/reports/registration/js/dist_reg.json',
-                '/admin/reports/registration/js/num_teachers.json',
-                '/admin/reports/registration/js/school_cat_reg.json'
-            ];
-            
-            vscode.window.showInformationMessage(`Testing ${jsonFiles.length} JSON files...`);
-            
-            let results = `📊 JSON Files Test Results:\n\n`;
-            
-            for (const jsonPath of jsonFiles) {
+            const pluginFilesRoot = pathUtils.getPluginFilesRoot();
+            if (!pluginFilesRoot) {
+                vscode.window.showErrorMessage('No plugin web root configured. Run "Setup Plugin Web Root Directory" first.');
+                return;
+            }
+
+            function findJsonFiles(dir, results = []) {
+                if (!fs.existsSync(dir)) return results;
+                for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                    if (entry.isDirectory()) {
+                        if (entry.name === 'pagecataloging') continue;
+                        findJsonFiles(path.join(dir, entry.name), results);
+                    } else if (entry.isFile() && entry.name.endsWith('.json')) {
+                        results.push(path.join(dir, entry.name));
+                    }
+                }
+                return results;
+            }
+
+            const localJsonFiles = findJsonFiles(pluginFilesRoot);
+            if (localJsonFiles.length === 0) {
+                vscode.window.showInformationMessage('No .json files found in the current plugin web root.');
+                return;
+            }
+
+            const quickPickItems = localJsonFiles.map(localPath => ({
+                label: pathUtils.getRemotePathFromLocal(localPath, pluginFilesRoot),
+                picked: true
+            }));
+
+            const selected = await vscode.window.showQuickPick(quickPickItems, {
+                canPickMany: true,
+                title: 'Select JSON endpoints to test',
+                placeHolder: 'All .json files pre-selected — uncheck any to skip'
+            });
+
+            if (!selected || selected.length === 0) return;
+
+            const out = getOutputChannel();
+            out.clear();
+            out.show(true);
+            out.appendLine(`JSON Endpoint Test Results — ${new Date().toLocaleTimeString()}`);
+            out.appendLine(`Testing ${selected.length} endpoint${selected.length === 1 ? '' : 's'}...\n`);
+
+            for (const item of selected) {
+                const jsonPath = item.label;
                 try {
                     const response = await api.makeRequest(jsonPath);
-                    const fileName = jsonPath.split('/').pop();
-                    
                     if (response.statusCode === 200) {
-                        const dataLength = typeof response.data === 'string' ? response.data.length : JSON.stringify(response.data).length;
-                        results += `✅ ${fileName}: ${response.statusCode} (${dataLength} bytes)\n`;
+                        const dataLength = typeof response.data === 'string'
+                            ? response.data.length
+                            : JSON.stringify(response.data).length;
+                        out.appendLine(`✅ ${jsonPath}  [${response.statusCode}]  ${dataLength} bytes`);
                     } else {
-                        results += `❌ ${fileName}: ${response.statusCode}\n`;
+                        out.appendLine(`❌ ${jsonPath}  [${response.statusCode}]`);
                     }
                 } catch (error) {
-                    const fileName = jsonPath.split('/').pop();
-                    results += `❌ ${fileName}: ${error.message}\n`;
+                    out.appendLine(`❌ ${jsonPath}  ${error.message}`);
                 }
             }
-            
-            results += `\n💡 These files exist on the server but are not returned by the /ws/cpm/tree API.\n`;
-            results += `They may need to be accessed directly or are filtered by PowerSchool.`;
-            
-            vscode.window.showInformationMessage(results);
-            
+
+            out.appendLine('\nDone.');
+            vscode.window.showInformationMessage('JSON endpoint test complete. See the Output panel (PowerSchool CPM) for results.');
+
         } catch (error) {
-            vscode.window.showErrorMessage(`❌ JSON endpoint test failed: ${error.message}`);
+            vscode.window.showErrorMessage(`JSON endpoint test failed: ${error.message}`);
         }
     }));
     
