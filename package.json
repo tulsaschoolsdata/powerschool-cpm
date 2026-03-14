@@ -151,6 +151,10 @@
       {
         "command": "ps-vscode-cpm.noJsonFiles",
         "title": "ps-vscode-cpm: No JSON Files"
+      },
+      {
+        "command": "ps-vscode-cpm.scaffoldWithMcp",
+        "title": "ps-vscode-cpm: Scaffold with ps-mcp"
       }
     ],
     "views": {
@@ -216,6 +220,13 @@
           "when": "view == ps-vscode-cpm-explorer && (viewItem == file-custom || viewItem == file-custom-plugin)",
           "group": "context"
         }
+      ],
+      "explorer/context": [
+        {
+          "command": "ps-vscode-cpm.scaffoldWithMcp",
+          "when": "explorerResourceIsFolder && resourcePath =~ /queries_root|user_schema_root|permissions_root/",
+          "group": "ps-vscode-cpm@1"
+        }
       ]
     },
     "configuration": {
@@ -253,6 +264,12 @@
           "type": "number",
           "default": 5,
           "description": "Maximum folder depth to sync"
+        },
+        "ps-plugin.workspaceRoot": {
+          "type": "string",
+          "default": "src",
+          "description": "Relative path from the VS Code workspace folder to the plugin artifacts root (the directory containing plugin.xml). Use \"src\" for src-based layouts, \"\" (empty string) for flat layouts where plugin.xml is at the workspace root. Read by both ps-vscode-cpm and ps-mcp.",
+          "scope": "resource"
         }
       }
     }
