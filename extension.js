@@ -46,8 +46,9 @@ function activate(context) {
         vscode.workspace.registerTextDocumentContentProvider('powerschool', powerschoolContentProvider)
     );
     
-    // Store globally for cleanup
+    // Store globally for cleanup and inter-extension access
     global.powerschoolCpmTreeProvider = treeProvider;
+    global.powerschoolCpmApi = api;
 
     // Watch for workspace changes to update the tree provider
     const workspaceWatcher = vscode.workspace.onDidChangeWorkspaceFolders(() => {
@@ -56,15 +57,23 @@ function activate(context) {
         treeProvider.refresh();
     });
 
-    // Watch for configuration changes to update API settings
+    // Watch for configuration changes to update API settings.
+    // Responds to both ps-vscode-cpm.* and ps-plugin.workspaceRoot (shared with ps-mcp).
     const configWatcher = vscode.workspace.onDidChangeConfiguration(e => {
-        if (e.affectsConfiguration('ps-vscode-cpm')) {
+        const cpmChanged = e.affectsConfiguration('ps-vscode-cpm');
+        const sharedRootChanged = e.affectsConfiguration('ps-plugin.workspaceRoot');
+
+        if (cpmChanged) {
             api.clearAuth();
             api.initialize();
-            if (e.affectsConfiguration('ps-vscode-cpm.pluginWebRoot')) {
-                pluginFilesRoot = pathUtils.getPluginFilesRoot();
-                treeProvider.localRootPath = pluginFilesRoot;
-            }
+        }
+
+        if ((cpmChanged && e.affectsConfiguration('ps-vscode-cpm.pluginWebRoot')) || sharedRootChanged) {
+            pluginFilesRoot = pathUtils.getPluginFilesRoot();
+            treeProvider.localRootPath = pluginFilesRoot;
+        }
+
+        if (cpmChanged || sharedRootChanged) {
             treeProvider.refresh();
         }
     });
@@ -272,9 +281,20 @@ function deactivate() {
     if (global.powerschoolCpmTreeProvider) {
         global.powerschoolCpmTreeProvider = null;
     }
+
+    if (global.powerschoolCpmApi) {
+        global.powerschoolCpmApi = null;
+    }
 }
 
 module.exports = {
     activate,
-    deactivate
+    deactivate,
+    /**
+     * Returns the active PowerSchoolAPI instance.
+     * Intended for Phase 2 ps-mcp live API integration:
+     *   const cpm = vscode.extensions.getExtension('zuvy.ps-vscode-cpm');
+     *   if (cpm?.isActive) { const api = cpm.exports.getPowerSchoolApi(); }
+     */
+    getPowerSchoolApi: () => global.powerschoolCpmApi
 };

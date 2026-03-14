@@ -29,10 +29,11 @@ function getOutputChannel() {
 
 // Remove all local getPluginFilesRoot logic. Use pathUtils.getPluginFilesRoot() everywhere.
 
-// Helper to get the path to plugin.xml in the plugin root
+// Helper to get the path to plugin.xml in the artifacts root (where plugin.xml lives,
+// not web_root). Uses getPluginArtifactsRoot() via the shared ps-plugin.workspaceRoot key.
 function getPluginXmlPath() {
-    const pluginRoot = pathUtils.getPluginFilesRoot();
-    return path.join(pluginRoot, 'plugin.xml');
+    const artifactsRoot = pathUtils.getPluginArtifactsRoot();
+    return path.join(artifactsRoot, 'plugin.xml');
 }
 
 // Helper function to parse version from plugin.xml
@@ -89,7 +90,8 @@ async function createPluginZip(pluginName, version, dirsToInclude) {
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
-    const pluginFilesRoot = pathUtils.getPluginFilesRoot();
+    // ZIP is built from the artifacts root (where plugin.xml and artifact dirs live)
+    const pluginFilesRoot = pathUtils.getPluginArtifactsRoot();
     const zipFileName = `${pluginName}-${version}.zip`;
     const zipFilePath = path.join(pluginFilesRoot, zipFileName);
     // Remove old zip if exists
@@ -619,7 +621,8 @@ function registerPluginCommands(context, api, treeProvider) {
                 'pagecataloging', 'PageCataloging'
             ];
             
-            const pluginRoot = pathUtils.getPluginFilesRoot();
+            // Scan the artifacts root for directories to package (plugin.xml siblings)
+            const pluginRoot = pathUtils.getPluginArtifactsRoot();
             const dirsToInclude = potentialDirs.filter(dir => {
                 const dirPath = path.join(pluginRoot, dir);
                 return fs.existsSync(dirPath) && fs.statSync(dirPath).isDirectory();
@@ -672,6 +675,23 @@ function registerPluginCommands(context, api, treeProvider) {
             
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to package plugin: ${error.message}`);
+        }
+    }));
+
+    // Scaffold with ps-mcp command — right-click on queries_root, user_schema_root,
+    // or permissions_root in the Explorer to open VS Code chat with a pre-filled prompt.
+    commands.push(registerCommandSafely('ps-vscode-cpm.scaffoldWithMcp', async (uri) => {
+        try {
+            const folderName = path.basename(uri.fsPath);
+            const promptMap = {
+                'queries_root':     'Use ps-mcp to scaffold a new PowerQuery named query in this workspace.',
+                'user_schema_root': 'Use ps-mcp to scaffold a new DB extension for this workspace.',
+                'permissions_root': 'Use ps-mcp to scaffold a new permission mapping for this workspace.'
+            };
+            const prompt = promptMap[folderName] ?? 'Use ps-mcp to scaffold a new PowerSchool plugin artifact.';
+            await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt });
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to open chat: ${error.message}`);
         }
     }));
 
