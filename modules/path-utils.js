@@ -26,33 +26,17 @@ function getPluginArtifactsRoot() {
 
 /**
  * Get the pluginFilesRoot — the web_root directory used for CPM file sync.
- * Derived from ps-plugin.workspaceRoot + ps-vscode-cpm.pluginWebRoot.
- * Full path: {workspaceFolder}/{ps-plugin.workspaceRoot}/{ps-vscode-cpm.pluginWebRoot}
- * Falls back to the artifacts root if web_root does not yet exist.
+ * Full path: {workspaceFolder}/{ps-vscode-cpm.pluginWebRoot}
+ * The pluginWebRoot setting is a path relative to the workspace folder (e.g. "src/web_root").
  * @returns {string|null}
  */
 function getPluginFilesRoot() {
     const folders = vscode.workspace.workspaceFolders;
     if (!folders || folders.length === 0) return null;
     const workspaceRoot = folders[0].uri.fsPath;
-
     const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
-    const sharedConfig = vscode.workspace.getConfiguration('ps-plugin');
-
-    const artifactsRoot = sharedConfig.get('workspaceRoot', 'src');
     const pluginWebRootSetting = config.get('pluginWebRoot', 'web_root');
-
-    const parts = [workspaceRoot];
-    if (artifactsRoot) parts.push(artifactsRoot);
-    if (pluginWebRootSetting) parts.push(pluginWebRootSetting);
-
-    const webRootPath = path.join(...parts);
-    if (fs.existsSync(webRootPath) && fs.statSync(webRootPath).isDirectory()) {
-        return webRootPath;
-    }
-
-    // Fallback: return artifacts root (plugin has no web_root yet)
-    return artifactsRoot ? path.join(workspaceRoot, artifactsRoot) : workspaceRoot;
+    return pluginWebRootSetting ? path.join(workspaceRoot, pluginWebRootSetting) : workspaceRoot;
 }
 
 /**
