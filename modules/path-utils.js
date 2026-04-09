@@ -8,7 +8,26 @@ const fs = require('fs');
 const vscode = require('vscode');
 
 /**
- * Get the pluginFilesRoot (always includes web_root) for the current workspace.
+ * Get the artifacts root — the directory containing plugin.xml.
+ * Reads ps-plugin.workspaceRoot (shared with ps-mcp).
+ * Examples:
+ *   ps-plugin.workspaceRoot = "src"  → workspaceFolder/src
+ *   ps-plugin.workspaceRoot = ""     → workspaceFolder  (flat layout)
+ * @returns {string|null}
+ */
+function getPluginArtifactsRoot() {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) return null;
+    const workspaceRoot = folders[0].uri.fsPath;
+    const sharedConfig = vscode.workspace.getConfiguration('ps-plugin');
+    const artifactsRoot = sharedConfig.get('workspaceRoot', 'src');
+    return artifactsRoot ? path.join(workspaceRoot, artifactsRoot) : workspaceRoot;
+}
+
+/**
+ * Get the pluginFilesRoot — the web_root directory used for CPM file sync.
+ * Full path: {workspaceFolder}/{ps-vscode-cpm.pluginWebRoot}
+ * The pluginWebRoot setting is a path relative to the workspace folder (e.g. "src/web_root").
  * @returns {string|null}
  */
 function getPluginFilesRoot() {
@@ -16,30 +35,8 @@ function getPluginFilesRoot() {
     if (!folders || folders.length === 0) return null;
     const workspaceRoot = folders[0].uri.fsPath;
     const config = vscode.workspace.getConfiguration('ps-vscode-cpm');
-    const pluginRootSetting = config.get('plugin_root', '');
     const pluginWebRootSetting = config.get('pluginWebRoot', 'web_root');
-
-    // If plugin_root is set, use {workspaceRoot}/{plugin_root}/web_root
-    if (pluginRootSetting) {
-        const customWebRoot = path.join(workspaceRoot, pluginRootSetting, 'web_root');
-        if (fs.existsSync(customWebRoot) && fs.statSync(customWebRoot).isDirectory()) {
-            return customWebRoot;
-        }
-        // If only plugin_root exists, fallback to {workspaceRoot}/{plugin_root}
-        const customRoot = path.join(workspaceRoot, pluginRootSetting);
-        if (fs.existsSync(customRoot) && fs.statSync(customRoot).isDirectory()) {
-            return customRoot;
-        }
-    }
-    // If pluginWebRoot is set (and not handled above), use workspaceRoot/pluginWebRoot
-    if (pluginWebRootSetting && (!pluginRootSetting || pluginWebRootSetting !== pluginRootSetting)) {
-        const topLevelWebRoot = path.join(workspaceRoot, pluginWebRootSetting);
-        if (fs.existsSync(topLevelWebRoot) && fs.statSync(topLevelWebRoot).isDirectory()) {
-            return topLevelWebRoot;
-        }
-    }
-    // Fallback: use workspace root
-    return workspaceRoot;
+    return pluginWebRootSetting ? path.join(workspaceRoot, pluginWebRootSetting) : workspaceRoot;
 }
 
 /**
@@ -175,6 +172,7 @@ function compareFileContents(localFilePath, content) {
 
 module.exports = {
     getPluginFilesRoot,
+    getPluginArtifactsRoot,
     getLocalFilePathFromRemote,
     getRemotePathFromLocal,
     pathsMatch,
