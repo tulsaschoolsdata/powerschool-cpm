@@ -92,8 +92,16 @@ async function createPluginZip(pluginName, version, dirsToInclude) {
     const execAsync = promisify(exec);
     // ZIP is built from the artifacts root (where plugin.xml and artifact dirs live)
     const pluginFilesRoot = pathUtils.getPluginArtifactsRoot();
+
+    // Always write the ZIP to dist/ at the workspace root; create it if absent
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || pluginFilesRoot;
+    const distDir = path.join(workspaceRoot, 'dist');
+    if (!fs.existsSync(distDir)) {
+        fs.mkdirSync(distDir, { recursive: true });
+    }
+
     const zipFileName = `${pluginName}-${version}.zip`;
-    const zipFilePath = path.join(pluginFilesRoot, zipFileName);
+    const zipFilePath = path.join(distDir, zipFileName);
     // Remove old zip if exists
     if (fs.existsSync(zipFilePath)) {
         fs.unlinkSync(zipFilePath);
@@ -106,8 +114,8 @@ async function createPluginZip(pluginName, version, dirsToInclude) {
     if (itemsToZip.length === 0) {
         throw new Error('No items found to package. Ensure plugin.xml and directories exist.');
     }
-    // Create zip using native zip command
-    const zipCommand = `cd "${pluginFilesRoot}" && zip -r "${zipFileName}" ${itemsToZip.map(i => `"${i}"`).join(' ')}`;
+    // Pass absolute zipFilePath so the archive always lands in dist/ regardless of cd location
+    const zipCommand = `cd "${pluginFilesRoot}" && zip -r "${zipFilePath}" ${itemsToZip.map(i => `"${i}"`).join(' ')}`;
     try {
         await execAsync(zipCommand);
         return zipFilePath;
