@@ -267,7 +267,7 @@
         },
         "ps-plugin.workspaceRoot": {
           "type": "string",
-          "default": "src",
+          "default": "",
           "description": "Relative path from the VS Code workspace folder to the plugin artifacts root (the directory containing plugin.xml). Use \"src\" for src-based layouts, \"\" (empty string) for flat layouts where plugin.xml is at the workspace root. Read by both ps-vscode-cpm and ps-mcp.",
           "scope": "resource"
         }

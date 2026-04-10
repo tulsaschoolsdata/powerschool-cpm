@@ -20,7 +20,7 @@ function getPluginArtifactsRoot() {
     if (!folders || folders.length === 0) return null;
     const workspaceRoot = folders[0].uri.fsPath;
     const sharedConfig = vscode.workspace.getConfiguration('ps-plugin');
-    const artifactsRoot = sharedConfig.get('workspaceRoot', 'src');
+    const artifactsRoot = sharedConfig.get('workspaceRoot', '');
     return artifactsRoot ? path.join(workspaceRoot, artifactsRoot) : workspaceRoot;
 }
 
