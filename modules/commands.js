@@ -521,6 +521,32 @@ function registerFileCommands(context, api, treeProvider) {
         await treeProvider.deleteFileFromServer(treeItem);
     }));
 
+    // Compare with Original — opens a diff editor: left = builtInText, right = local (or server active)
+    commands.push(registerCommandSafely('ps-vscode-cpm.compareWithOriginal', async (treeItem) => {
+        if (!treeItem || !treeItem.remotePath) {
+            vscode.window.showWarningMessage('No file selected.');
+            return;
+        }
+        const originalUri = vscode.Uri.parse(`builtin:${treeItem.remotePath}`);
+        const localPath = pathUtils.getLocalFilePathFromRemote(treeItem.remotePath, treeProvider.localRootPath);
+        if (fs.existsSync(localPath)) {
+            await vscode.commands.executeCommand(
+                'vscode.diff',
+                originalUri,
+                vscode.Uri.file(localPath),
+                `${treeItem.label}: Original ↔ Local`
+            );
+        } else {
+            // No local file — diff original vs server active
+            await vscode.commands.executeCommand(
+                'vscode.diff',
+                originalUri,
+                vscode.Uri.parse(`powerschool:${treeItem.remotePath}`),
+                `${treeItem.label}: Original ↔ Server Active`
+            );
+        }
+    }));
+
     return commands;
 }
 
