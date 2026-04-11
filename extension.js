@@ -28,6 +28,10 @@ function activate(context) {
 
     const treeProvider = new PowerSchoolTreeProvider(api, pluginFilesRoot);
 
+    // Initialize schema root from setting (default web_root = null)
+    const initialContentRoot = vscode.workspace.getConfiguration('ps-vscode-cpm').get('contentRoot', 'web_root');
+    treeProvider.schemaRoot = initialContentRoot === 'web_root' ? null : initialContentRoot;
+
     // Register custom content provider for powerschool: scheme (for virtual document viewing)
     const powerschoolContentProvider = {
         provideTextDocumentContent: async (uri) => {
@@ -44,6 +48,24 @@ function activate(context) {
     };
     context.subscriptions.push(
         vscode.workspace.registerTextDocumentContentProvider('powerschool', powerschoolContentProvider)
+    );
+
+    // builtin: scheme — serves the original builtInText for "Compare with Original" diff views
+    const builtinContentProvider = {
+        provideTextDocumentContent: async (uri) => {
+            const remotePath = uri.path;
+            try {
+                const metadata = await api.downloadFileWithMetadata(remotePath);
+                const raw = /** @type {any} */ (metadata.rawResponse);
+                return (raw && raw.builtInText) || '// No original content available';
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                return `// Error loading original: ${msg}`;
+            }
+        }
+    };
+    context.subscriptions.push(
+        vscode.workspace.registerTextDocumentContentProvider('builtin', builtinContentProvider)
     );
     
     // Store globally for cleanup and inter-extension access
@@ -66,6 +88,8 @@ function activate(context) {
         if (cpmChanged) {
             api.clearAuth();
             api.initialize();
+            const contentRoot = vscode.workspace.getConfiguration('ps-vscode-cpm').get('contentRoot', 'web_root');
+            treeProvider.schemaRoot = contentRoot === 'web_root' ? null : contentRoot;
         }
 
         if ((cpmChanged && e.affectsConfiguration('ps-vscode-cpm.pluginWebRoot')) || sharedRootChanged) {
