@@ -17,6 +17,26 @@ const CODE_SNIPPETS = {
         category: 'Forms',
         description: 'PowerSchool date picker input field',
         content: `<input class="psDateWidget" type="date" name="fieldUniqueName" size="11" value="" id="fieldUniqueName" />`
+  },
+    navigation_block: {
+        name: 'Navigation Block',
+        category: 'Navigation',
+        description: 'Page Catalog navigation block with links',
+        content: `{
+                    "pages": [
+                      {
+                        "htmlID": "navFunctionsSection",
+                        "title": "",
+                        "iconName": "",
+                        "sortOrder": 1000,
+                        "pageURL": null,
+                        "pageDescription": null,
+                        "districtLevelContext": 0,
+                        "contextType": "main",
+                        "version": "0.1.0",
+                      }
+                    ]
+                  }`
     },
     
     dialog: {
