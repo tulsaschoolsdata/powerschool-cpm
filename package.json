@@ -62,6 +62,11 @@
         "icon": "$(code)"
       },
       {
+        "command": "ps-vscode-cpm.insertSnippet.navigation_block",
+        "title": "Navigation Block",
+        "icon": "$(list-tree)"
+      },
+      {
         "command": "ps-vscode-cpm.insertSnippet.box_round",
         "title": "ps-vscode-cpm: Insert Box-Round Div"
       },
