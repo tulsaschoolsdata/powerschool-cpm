@@ -420,6 +420,21 @@ class SnippetsProvider {
             }
         ));
 
+        // Navigation Snippets
+        items.push(new PanelTreeItem(
+            'Navigation Block',
+            'snippet',
+            {
+                iconPath: new vscode.ThemeIcon('list-tree'),
+                tooltip: 'Insert a Page Catalog navigation block with links',
+                description: 'Navigation',
+                command: {
+                    command: 'ps-vscode-cpm.insertSnippet.navigation_block',
+                    title: 'Navigation Block'
+                }
+            }
+        ));
+
         // Forms Snippets
         items.push(new PanelTreeItem(
             'PowerSchool Form',

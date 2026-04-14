@@ -37,12 +37,18 @@ function getPluginXmlPath() {
 }
 
 // Helper function to parse version from plugin.xml
+// Matches the version attribute on the <plugin element specifically,
+// not the XML declaration's version attribute.
 function parsePluginVersion(pluginXmlPath) {
     try {
         const xmlContent = fs.readFileSync(pluginXmlPath, 'utf8');
-        const versionMatch = xmlContent.match(/version="([^"]+)"/);
-        if (versionMatch) {
-            return versionMatch[1];
+        // Match version= only within the <plugin ...> opening tag
+        const pluginTagMatch = xmlContent.match(/<plugin\b[^>]*>/);
+        if (pluginTagMatch) {
+            const versionMatch = pluginTagMatch[0].match(/\bversion="([^"]+)"/);
+            if (versionMatch) {
+                return versionMatch[1];
+            }
         }
     } catch (error) {
         // Silent fallback
@@ -51,10 +57,15 @@ function parsePluginVersion(pluginXmlPath) {
 }
 
 // Helper function to update version in plugin.xml
+// Only replaces version= within the <plugin ...> opening tag.
 function updatePluginVersion(pluginXmlPath, newVersion) {
     try {
         let xmlContent = fs.readFileSync(pluginXmlPath, 'utf8');
-        xmlContent = xmlContent.replace(/version="[^"]+"/, `version="${newVersion}"`);
+        // Replace version attribute only inside the <plugin ...> tag
+        xmlContent = xmlContent.replace(
+            /(<plugin\b[^>]*)\bversion="[^"]+"/,
+            `$1version="${newVersion}"`
+        );
         fs.writeFileSync(pluginXmlPath, xmlContent, 'utf8');
         return true;
     } catch (error) {
@@ -593,13 +604,10 @@ function registerPluginCommands(context, api, treeProvider) {
                 
                 if (versionType.value === 'custom') {
                     const customVersion = await vscode.window.showInputBox({
-                        prompt: 'Enter custom version number',
+                        prompt: 'Enter version number',
                         value: currentVersion,
                         validateInput: (value) => {
-                            if (!value) return 'Version is required';
-                            if (!/^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.-]+)?$/.test(value)) {
-                                return 'Version must follow semantic versioning (e.g., 1.0.0 or 1.0.0-beta)';
-                            }
+                            if (!value || !value.trim()) return 'Version is required';
                             return null;
                         }
                     });
@@ -618,13 +626,16 @@ function registerPluginCommands(context, api, treeProvider) {
                 vscode.window.showInformationMessage(`Updated plugin.xml version to ${versionToUse}`);
             }
             
-            // Get plugin name from plugin.xml
+            // Get plugin name from plugin.xml — read from the <plugin> tag specifically
             let pluginName = 'plugin';
             try {
                 const xmlContent = fs.readFileSync(pluginXmlPath, 'utf8');
-                const nameMatch = xmlContent.match(/name="([^"]+)"/);
-                if (nameMatch) {
-                    pluginName = nameMatch[1].toLowerCase().replace(/[^a-z0-9-]/g, '-');
+                const pluginTagMatch = xmlContent.match(/<plugin\b[^>]*>/);
+                if (pluginTagMatch) {
+                    const nameMatch = pluginTagMatch[0].match(/\bname="([^"]+)"/);
+                    if (nameMatch) {
+                        pluginName = nameMatch[1].toLowerCase().replace(/[^a-z0-9-]/g, '-');
+                    }
                 }
             } catch (error) {
                 // Use default name
@@ -802,7 +813,7 @@ function registerSnippetCommands(context, api, treeProvider) {
     }));
 
     // Individual snippet commands
-    const snippetKeys = ['box_round', 'calendar', 'dialog', 'dynamic_tabs', 'jquery_function', 'form', 'table', 'tlist_sql', 'collapsible_box', 'if_block', 'student_info', 'breadcrumb'];
+    const snippetKeys = ['box_round', 'navigation_block', 'calendar', 'dialog', 'dynamic_tabs', 'jquery_function', 'form', 'table', 'tlist_sql', 'collapsible_box', 'if_block', 'student_info', 'breadcrumb'];
     
     snippetKeys.forEach(key => {
         commands.push(registerCommandSafely(`ps-vscode-cpm.insertSnippet.${key}`, async () => {
