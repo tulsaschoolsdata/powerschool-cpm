@@ -2,7 +2,7 @@
   "name": "ps-vscode-cpm",
   "displayName": "ps-vscode-cpm",
   "description": "Manage custom pages in PowerSchool",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "publisher": "zuvy",
   "engines": {
     "vscode": "^1.104.0"
@@ -60,6 +60,11 @@
         "command": "ps-vscode-cpm.insertSnippet",
         "title": "ps-vscode-cpm: Insert Code Snippet",
         "icon": "$(code)"
+      },
+      {
+        "command": "ps-vscode-cpm.insertSnippet.navigation_block",
+        "title": "Navigation Block",
+        "icon": "$(list-tree)"
       },
       {
         "command": "ps-vscode-cpm.insertSnippet.box_round",
@@ -155,6 +160,11 @@
       {
         "command": "ps-vscode-cpm.scaffoldWithMcp",
         "title": "ps-vscode-cpm: Scaffold with ps-mcp"
+      },
+      {
+        "command": "ps-vscode-cpm.compareWithOriginal",
+        "title": "Compare with Original",
+        "category": "PowerSchool CPM"
       }
     ],
     "views": {
@@ -212,13 +222,18 @@
       "view/item/context": [
         {
           "command": "ps-vscode-cpm.publishFile",
-          "when": "view == ps-vscode-cpm-explorer && (viewItem == file || viewItem == file-custom || viewItem == file-custom-plugin)",
+          "when": "view == ps-vscode-cpm-explorer && (viewItem == file || viewItem == file-custom || viewItem == file-plugin)",
           "group": "inline"
         },
         {
+          "command": "ps-vscode-cpm.compareWithOriginal",
+          "when": "view == ps-vscode-cpm-explorer && (viewItem == file-custom || viewItem == file-plugin)",
+          "group": "ps-vscode-cpm@2"
+        },
+        {
           "command": "ps-vscode-cpm.deleteFileFromServer",
-          "when": "view == ps-vscode-cpm-explorer && (viewItem == file-custom || viewItem == file-custom-plugin)",
-          "group": "context"
+          "when": "view == ps-vscode-cpm-explorer && viewItem == file-custom",
+          "group": "ps-vscode-cpm@3"
         }
       ],
       "explorer/context": [
@@ -270,6 +285,12 @@
           "default": "",
           "description": "Relative path from the VS Code workspace folder to the plugin artifacts root (the directory containing plugin.xml). Use \"src\" for src-based layouts, \"\" (empty string) for flat layouts where plugin.xml is at the workspace root. Read by both ps-vscode-cpm and ps-mcp.",
           "scope": "resource"
+        },
+        "ps-vscode-cpm.contentRoot": {
+          "type": "string",
+          "enum": ["web_root", "queries_root", "user_schema_root"],
+          "default": "web_root",
+          "description": "Which CPM content root to browse. Use 'web_root' for standard pages, 'queries_root' or 'user_schema_root' for extended schema."
         }
       }
     }
