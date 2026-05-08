@@ -147,6 +147,21 @@ function registerCommands(context, api, treeProvider) {
     
     const commands = [];
     
+    // Set Session Cookie command for non-technical users
+    commands.push(registerCommandSafely('ps-vscode-cpm.setSessionCookie', async () => {
+        const cookie = await vscode.window.showInputBox({
+            prompt: 'Paste your full PowerSchool session cookie here',
+            ignoreFocusOut: true,
+            placeHolder: 'speedyStudentListAcknowledgement=true; ...JSESSIONID=...' 
+        });
+        if (cookie && cookie.trim()) {
+            await vscode.workspace.getConfiguration('ps-vscode-cpm').update('sessionCookie', cookie.trim(), vscode.ConfigurationTarget.Global);
+            vscode.window.showInformationMessage('Session cookie set! All future PowerSchool CPM actions will use this cookie.');
+        } else {
+            vscode.window.showWarningMessage('Session cookie input was empty or cancelled.');
+        }
+    }));
+
     // Refresh command
     commands.push(registerCommandSafely('ps-vscode-cpm.refresh', () => {
         api.clearAuth();

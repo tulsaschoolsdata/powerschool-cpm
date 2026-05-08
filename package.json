@@ -135,6 +135,11 @@
         "title": "Parent Portal Page"
       },
       {
+        "command": "ps-vscode-cpm.setSessionCookie",
+        "title": "ps-vscode-cpm: Set Session Cookie",
+        "icon": "$(key)"
+      },
+      {
         "command": "ps-vscode-cpm.openSettings",
         "title": "ps-vscode-cpm: Configure Server Settings",
         "icon": "$(settings-gear)"
@@ -257,6 +262,12 @@
           "type": "string",
           "default": "",
           "description": "PowerSchool username for CPM session authentication (fallback for CPM APIs)",
+          "scope": "window"
+        },
+        "ps-vscode-cpm.sessionCookie": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Paste a valid PowerSchool session cookie here to bypass normal login. **Warning:** Never share or commit this value. Session cookies expire and must be refreshed manually.",
           "scope": "window"
         },
         "ps-vscode-cpm.password": {

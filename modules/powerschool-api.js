@@ -61,9 +61,16 @@ class PowerSchoolAPI {
         this.baseUrl = config.get('serverUrl', '').replace(/\/$/, '');
         this.username = config.get('username');
         this.password = config.get('password');
-        
+        // --- Session Cookie Bypass: Load the cookie from settings ---
+        this.sessionCookie = config.get('sessionCookie', '').trim();
+        this.useSessionCookie = !!this.sessionCookie;
+
         if (!this.baseUrl) {
             throw new Error('PowerSchool server URL not configured. Please set ps-vscode-cpm.serverUrl in settings.');
+        }
+        // Warn if user sets both cookie and user/pass
+        if (this.useSessionCookie && this.username && this.password) {
+            vscode.window.showWarningMessage('ps-vscode-cpm: Session cookie will take precedence over username/password.');
         }
     }
 
@@ -72,6 +79,8 @@ class PowerSchoolAPI {
         this.lastSessionCheck = 0;
         this.cookies.clear();
         this.sessionCookies = '';
+        this.sessionCookie = '';
+        this.useSessionCookie = false;
         // DON'T clear content ID cache - it persists across auth changes
         // this.contentIdCache.clear();
     }
@@ -93,11 +102,17 @@ class PowerSchoolAPI {
         }
     }
 
+    /**
+     * Return the cookie header for outgoing requests.
+     * If session cookie bypass is enabled, always use the configured cookie.
+     */
     getCookieHeader() {
+        if (this.useSessionCookie && this.sessionCookie) {
+            return this.sessionCookie;
+        }
         if (this.cookies.size === 0) {
             return '';
         }
-        
         const cookieStrings = [];
         for (const [name, value] of this.cookies) {
             cookieStrings.push(`${name}=${value}`);
@@ -206,7 +221,16 @@ class PowerSchoolAPI {
         });
     }
 
+    /**
+     * Ensure the session is authenticated.
+     * If session cookie bypass is enabled, trust the cookie—skip login/session check logic.
+     */
     async ensureSessionAuth() {
+        if (this.useSessionCookie && this.sessionCookie) {
+            // Skip all login/session checks if bypass is enabled
+            this.sessionValid = true;
+            return true;
+        }
         let isLoggedIn = await this.checkSession();
         
         if (!isLoggedIn) {
@@ -225,6 +249,10 @@ class PowerSchoolAPI {
         return true;
     }
 
+    /**
+     * Get authentication headers for PowerSchool API requests.
+     * Prefer session cookie if present, else use built cookie from login sequence.
+     */
     getAuthHeaders() {
         return { 'Cookie': this.getCookieHeader() };
     }
